@@ -1,1 +1,415 @@
-<h1>hawk tuah<h1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Video Maker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Hide scrollbars */
+            background-color: #000;
+        }
+
+        body {
+            font-family: 'Comic Neue', 'Comic Sans MS', cursive, sans-serif;
+        }
+
+        #slide {
+            width: 100vw;
+            height: 100vh;
+            background-color: #5c8fcc;
+            perspective: 800px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            filter: blur(0.7px) saturate(0.9) contrast(1.1);
+        }
+        
+        #image-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through */
+        }
+
+        #image-container img {
+            position: absolute;
+            object-fit: cover;
+            box-shadow: 4px 4px 8px rgba(0,0,0,0.3);
+            border: 2px solid white;
+            border-radius: 0.5rem;
+            opacity: 0; /* Start hidden for animations */
+        }
+
+        #slide::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 98%, rgba(255,255,255,0.1) 99%, rgba(0,0,0,0.1) 100%);
+            background-size: 100% 3px;
+            opacity: 0.6;
+            pointer-events: none;
+            animation: flicker 0.15s infinite;
+            z-index: 20; /* Ensure it's on top of image */
+        }
+
+        @keyframes flicker {
+            0% { opacity: 0.5; }
+            50% { opacity: 0.7; }
+            100% { opacity: 0.5; }
+        }
+
+        #animatedText {
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            transform-style: preserve-3d;
+            opacity: 0; /* Start hidden */
+            position: relative; /* Ensure text is on top of image */
+            z-index: 10;
+        }
+        
+        /* --- Animation Keyframes (same as before) --- */
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+        .fade-in { animation: fadeIn 1s ease-out forwards; }
+        @keyframes fadeOut { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } }
+        .fade-out { animation: fadeOut 1s ease-in forwards; }
+        @keyframes spinIn { from { opacity: 0; transform: rotateY(-90deg) scale(0.8); } to { opacity: 1; transform: rotateY(0deg) scale(1); } }
+        .spin-in { animation: spinIn 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        @keyframes spinOut { from { opacity: 1; transform: rotateY(0deg) scale(1); } to { opacity: 0; transform: rotateY(90deg) scale(0.8); } }
+        .spin-out { animation: spinOut 1.2s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-100%); } to { opacity: 1; transform: translateX(0); } }
+        .slide-in { animation: slideIn 1s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+        @keyframes slideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+        .slide-out { animation: slideOut 1s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards; }
+
+        /* Useless control bar styling - Modern Look */
+        #control-bar {
+            position: fixed;
+/* ... existing code ... -->
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .control-btn {
+            background-color: transparent;
+/* ... existing code ... -->
+            cursor: default; /* It does nothing! */
+            color: #fff;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        .control-btn:hover {
+            opacity: 1;
+        }
+        .hidden {
+            display: none;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #enter-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: opacity 0.8s ease-out;
+        }
+
+        #enter-screen p {
+            color: white;
+            font-size: 2rem;
+            text-shadow: 0 0 10px white;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+
+        .nav-arrow {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 500;
+            cursor: pointer;
+            background-color: rgba(0, 0, 0, 0.3);
+            color: white;
+            border-radius: 50%;
+            width: 3rem;
+            height: 3rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s, opacity 0.3s;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .nav-arrow:hover {
+            background-color: rgba(0, 0, 0, 0.6);
+        }
+        #prev-btn {
+            left: 1.5rem;
+        }
+        #next-btn {
+            right: 1.5rem;
+        }
+
+    </style>
+</head>
+<body>
+        <source src="https://github.com/880-0fjs94ns88/880-0fjs4ns88.github.io/raw/refs/heads/main/database/bgmp3.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <div id="slide">
+        <div id="image-container"></div>
+        <p id="animatedText" class="text-5xl md:text-7xl font-bold text-white text-center p-8 break-words"></p>
+    </div>
+
+    <div id="prev-btn" class="nav-arrow hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-chevron-left" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+        </svg>
+    </div>
+    <div id="next-btn" class="nav-arrow hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-chevron-right" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+        </svg>
+    </div>
+
+    <!-- 
+        --- CUSTOMIZE YOUR VIDEO HERE ---
+        Edit, add, or remove the <div class="slide-data"> elements below.
+        - data-text: The main text for the slide.
+        - data-in / data-out: Animation for the text ('fade-in', 'spin-in', 'slide-in', etc.).
+        - data-time: How long the slide stays on screen in seconds (e.g., "3.5" for 3.5 seconds).
+
+        To add images, place <div class="image-data"> inside a slide.
+        - data-src: URL of the image.
+        - data-position: TailwindCSS classes for position (e.g., 'top-8 right-8').
+        - data-size: TailwindCSS classes for size (e.g., 'w-48 h-36').
+        - data-animation: In-animation for the image.
+    -->
+    <div id="slides-data" style="display: none;">
+
+        <div class="slide-data" data-text="Your adventure begins..." data-in="fade-in" data-out="fade-out" data-time="3">
+            <div class="image-data" data-src="https://placehold.co/400x300/0f172a/ffffff?text=Image+A" data-position="top-8 right-8" data-size="w-48 h-36" data-animation="slide-in"></div>
+        </div>
+
+        <div class="slide-data" data-text="With images in corners" data-in="slide-in" data-out="slide-out" data-time="3.5">
+            <div class="image-data" data-src="https://placehold.co/400x300/4a044e/ffffff?text=Image+B" data-position="bottom-20 left-8" data-size="w-56 h-40" data-animation="fade-in"></div>
+        </div>
+
+        <div class="slide-data" data-text="And text that spins!" data-in="spin-in" data-out="spin-out" data-time="4">
+            <div class="image-data" data-src="https://placehold.co/400x300/064e3b/ffffff?text=Image+C" data-position="top-8 left-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+            <div class="image-data" data-src="https://placehold.co/400x300/7f1d1d/ffffff?text=Image+D" data-position="bottom-20 right-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+        </div>
+
+        <div class="slide-data" data-text="The end." data-in="fade-in" data-out="fade-out" data-time="2.5">
+            <!-- No images on this slide -->
+        </div>
+
+    </div>
+
+
+    <footer id="control-bar">
+        <button class="control-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 3.5A.5.5 0 0 1 1 4v8a.5.5 0 0 1-1 0V4a.5.5 0 0 1 .5-.5m2 0a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-1 0V4a.5.5 0 0 1 .5-.5m11.5 0a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5M4.5 4a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7Z"/></svg>
+        </button>
+        <div class="font-mono">Slide: <span id="slide-counter">1 / 4</span></div>
+        <div class="flex-grow"></div>
+        <div>Slide Show</div>
+        <div class="flex-grow"></div>
+        <div class="font-mono">00:00:03</div>
+        <button id="music-toggle-btn" class="control-btn" title="Toggle Music" style="cursor: pointer;">
+             <svg id="music-on-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-volume-up-fill" viewBox="0 0 16 16">
+                <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
+                <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.482 5.482 0 0 1 11.025 8a5.482 5.482 0 0 1-1.61 3.89l.706.706z"/>
+                <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/>
+             </svg>
+             <svg id="music-off-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" class="bi bi-volume-mute-fill hidden" viewBox="0 0 16 16">
+                <path d="M6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06zm-2.51 4.34L6 10.297V5.703L4.207 7.5H2v1h2.207zM12.55 5.34A.5.5 0 0 0 12 5.5v5a.5.5 0 0 0 .55.49l3.45-2.76a.5.5 0 0 0 0-.98L12.55 5.34z"/>
+             </svg>
+        </button>
+    </footer>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const enterScreen = document.getElementById('enter-screen');
+            const controlBar = document.getElementById('control-bar');
+            const textElement = document.getElementById('animatedText');
+            const imageContainer = document.getElementById('image-container');
+            const slideCounterElement = document.getElementById('slide-counter');
+            const music = document.getElementById('background-music');
+            const musicBtn = document.getElementById('music-toggle-btn');
+            const musicOnIcon = document.getElementById('music-on-icon');
+            const musicOffIcon = document.getElementById('music-off-icon');
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            let isTransitioning = false;
+
+            // --- START SCREEN LOGIC ---
+            enterScreen.addEventListener('click', () => {
+                // Play music
+                music.play().catch(e => console.error("Audio playback failed:", e));
+                musicOnIcon.classList.remove('hidden');
+                musicOffIcon.classList.add('hidden');
+
+                // Fade out enter screen
+                enterScreen.style.opacity = '0';
+                setTimeout(() => {
+                    enterScreen.style.display = 'none';
+                }, 800); // Match CSS transition
+
+                // Show control bar
+                controlBar.style.opacity = '1';
+                controlBar.style.pointerEvents = 'auto';
+
+
+                // Show the first slide
+                showSlide(0);
+            }, { once: true }); // This event listener will only run once.
+
+
+            // --- MUSIC TOGGLE ---
+            musicBtn.addEventListener('click', () => {
+                if (music.paused) {
+                    music.play().catch(e => console.error("Audio playback failed:", e));
+                    musicOnIcon.classList.remove('hidden');
+                    musicOffIcon.classList.add('hidden');
+                } else {
+                    music.pause();
+                    musicOnIcon.classList.add('hidden');
+                    musicOffIcon.classList.remove('hidden');
+                }
+            });
+
+            // --- DATA PARSING ---
+            // Read slide data directly from the HTML structure.
+            const slides = Array.from(document.querySelectorAll('#slides-data .slide-data')).map(slideEl => {
+                const smallImages = Array.from(slideEl.querySelectorAll('.image-data')).map(imgEl => ({
+                    src: imgEl.dataset.src,
+                    position: imgEl.dataset.position,
+                    size: imgEl.dataset.size,
+                    animation: imgEl.dataset.animation,
+                }));
+
+                return {
+                    text: slideEl.dataset.text,
+                    in: slideEl.dataset.in,
+                    out: slideEl.dataset.out,
+                    duration: parseFloat(slideEl.dataset.time) * 1000, // Read time in seconds and convert to ms
+                    smallImages: smallImages
+                };
+            });
+            // --- END OF DATA PARSING ---
+
+            let currentSlideIndex = 0;
+
+            function applyAnimation(element, animationClass) {
+                // Reset classes first
+                element.className = element.className.split(' ').filter(c => !c.startsWith('fade-') && !c.startsWith('spin-') && !c.startsWith('slide-')).join(' ');
+                void element.offsetWidth;
+                element.classList.add(animationClass);
+            }
+
+            function delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            function updateArrowVisibility() {
+                prevBtn.classList.toggle('hidden', currentSlideIndex === 0);
+                nextBtn.classList.toggle('hidden', currentSlideIndex === slides.length - 1);
+            }
+
+            function showSlide(index) {
+                if (index < 0 || index >= slides.length) return;
+                
+                currentSlideIndex = index;
+                const slide = slides[currentSlideIndex];
+
+                // Update slide counter
+                slideCounterElement.textContent = `${currentSlideIndex + 1} / ${slides.length}`;
+                
+                // Clear previous images
+                imageContainer.innerHTML = '';
+
+                // Create and add new images for the current slide
+                if (slide.smallImages && slide.smallImages.length > 0) {
+                    slide.smallImages.forEach(imgData => {
+                        const img = document.createElement('img');
+                        img.src = imgData.src;
+                        img.className = `${imgData.position} ${imgData.size}`;
+                        imageContainer.appendChild(img);
+                        // Apply animation to the new image
+                        setTimeout(() => applyAnimation(img, imgData.animation), 100);
+                    });
+                }
+
+                // Set text and play IN animation
+                textElement.textContent = slide.text;
+                applyAnimation(textElement, slide.in);
+                
+                updateArrowVisibility();
+                isTransitioning = false;
+            }
+
+            async function transitionTo(newIndex) {
+                if (isTransitioning) return;
+                isTransitioning = true;
+
+                const slide = slides[currentSlideIndex];
+
+                // Play the OUT animation for the text
+                applyAnimation(textElement, slide.out);
+
+                // Play OUT animation for all images
+                imageContainer.querySelectorAll('img').forEach(img => {
+                   const outAnimation = img.classList.contains('spin-in') ? 'spin-out' :
+                                       img.classList.contains('slide-in') ? 'slide-out' : 'fade-out';
+                   applyAnimation(img, outAnimation);
+                });
+
+                // Wait for the OUT animation to finish 
+                await delay(1000); 
+
+                showSlide(newIndex);
+            }
+
+            nextBtn.addEventListener('click', () => {
+                if(currentSlideIndex < slides.length - 1) {
+                    transitionTo(currentSlideIndex + 1);
+                }
+            });
+
+            prevBtn.addEventListener('click', () => {
+                if(currentSlideIndex > 0) {
+                    transitionTo(currentSlideIndex - 1);
+                }
+            });
+
+        });
+    </script>
+</body>
+</html>
+
