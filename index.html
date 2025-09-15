@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Retro Video Maker</title>
+    <title>uhhh i forgot</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -98,12 +98,29 @@
         /* Useless control bar styling - Modern Look */
         #control-bar {
             position: fixed;
-/* ... existing code ... -->
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 45px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0.5));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 15px;
+            gap: 15px;
+            color: #fff;
+            z-index: 100;
+            font-family: 'Tahoma', sans-serif;
+            font-size: 14px;
+            opacity: 0; /* Start hidden */
+            pointer-events: none; /* Start unclickable */
+            transition: opacity 0.5s ease-in-out;
             border-top: 1px solid rgba(255, 255, 255, 0.2);
         }
         .control-btn {
             background-color: transparent;
-/* ... existing code ... -->
+            border: none;
+            padding: 2px 4px;
             cursor: default; /* It does nothing! */
             color: #fff;
             opacity: 0.8;
@@ -176,7 +193,12 @@
     </style>
 </head>
 <body>
-        <source src="https://github.com/880-0fjs94ns88/880-0fjs4ns88.github.io/raw/refs/heads/main/database/bgmp3.mp3" type="audio/mpeg">
+    <div id="enter-screen">
+        <p>Click to Enter...</p>
+    </div>
+
+    <audio id="background-music" loop>
+        <source src="https://github.com/880-0fjs94ns88/880-0fjs94ns88.github.io/raw/refs/heads/main/database/bgmp3.mp3" type="audio/mpeg">
         Your browser does not support the audio element.
     </audio>
 
@@ -211,23 +233,31 @@
     -->
     <div id="slides-data" style="display: none;">
 
-        <div class="slide-data" data-text="Your adventure begins..." data-in="fade-in" data-out="fade-out" data-time="3">
-            <div class="image-data" data-src="https://placehold.co/400x300/0f172a/ffffff?text=Image+A" data-position="top-8 right-8" data-size="w-48 h-36" data-animation="slide-in"></div>
+        <div class="slide-data" data-text="hello!!" data-in="fade-in" data-out="fade-out" data-time="3">
         </div>
 
-        <div class="slide-data" data-text="With images in corners" data-in="slide-in" data-out="slide-out" data-time="3.5">
-            <div class="image-data" data-src="https://placehold.co/400x300/4a044e/ffffff?text=Image+B" data-position="bottom-20 left-8" data-size="w-56 h-40" data-animation="fade-in"></div>
+        <div class="slide-data" data-text="welcome to my portfolio" data-in="slide-in" data-out="slide-out" data-time="3.5">
         </div>
 
-        <div class="slide-data" data-text="And text that spins!" data-in="spin-in" data-out="spin-out" data-time="4">
-            <div class="image-data" data-src="https://placehold.co/400x300/064e3b/ffffff?text=Image+C" data-position="top-8 left-8" data-size="w-40 h-40" data-animation="spin-in"></div>
-            <div class="image-data" data-src="https://placehold.co/400x300/7f1d1d/ffffff?text=Image+D" data-position="bottom-20 right-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+        <div class="slide-data" data-text="yeah ik its peak" data-in="spin-in" data-out="spin-out" data-time="4">
         </div>
 
-        <div class="slide-data" data-text="The end." data-in="fade-in" data-out="fade-out" data-time="2.5">
-            <!-- No images on this slide -->
+        <div class="slide-data" data-text="ok let me show you what i have done" data-in="fade-in" data-out="fade-out" data-time="2.5">
         </div>
 
+        <div class="slide-data" data-text="so like i know lua and html yeah" data-in="spin-in" data-out="spin-out" data-time="4">
+            <div class="image-data" data-src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Lua-Logo.svg/2048px-Lua-Logo.svg.png" data-position="top-8 left-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+            <div class="image-data" data-src="https://icons.iconarchive.com/icons/cornmanthe3rd/plex/512/Other-html-5-icon.png" data-position="bottom-20 right-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+        </div>
+        <div class="slide-data" data-text="also like im kinda a discord mod deadass (no buly!!)" data-in="fade-in" data-out="fade-out" data-time="2.5">
+            <div class="image-data" data-src="https://bluemoji.io/cdn-proxy/646218c67da47160c64a84d5/66b3eb826bc6e984281381bc_20.png" data-position="top-8 left-8" data-size="w-40 h-40" data-animation="spin-in"></div>
+        </div>
+        <div class="slide-data" data-text="i have moderated 5+ servers so like u should make me admin in your server" data-in="fade-in" data-out="fade-out" data-time="2.5">
+        </div>
+        <div class="slide-data" data-text="anyways yeah thats kinda it" data-in="fade-in" data-out="fade-out" data-time="2.5">
+        </div>
+        <div class="slide-data" data-text="errorrail out" data-in="fade-in" data-out="fade-out" data-time="2.5">
+        </div>
     </div>
 
 
