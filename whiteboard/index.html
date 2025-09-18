@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite Client-Side Collaborative Whiteboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Infinite Collaborative Whiteboard with Sidebar</title>
     <style>
         body {
             margin: 0;
@@ -11,88 +11,125 @@
             font-family: Arial, sans-serif;
             background-color: #f0f0f0;
             overflow: hidden;
+            touch-action: none;
         }
-        #toolbar {
+        #canvas {
             position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
+            width: 100vw;
+            height: 100vh;
+            background-color: white;
+            touch-action: none;
+        }
+        #canvas.mouse {
+            cursor: crosshair;
+        }
+        #canvas.pen {
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="black"/></svg>') 8 8, auto;
+        }
+        #canvas.eraser {
+            cursor: grab;
+        }
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 250px;
+            height: 100vh;
             background-color: #333;
             color: white;
-            padding: 10px;
+            padding: 15px;
             display: flex;
-            align-items: center;
+            flex-direction: column;
             gap: 10px;
             z-index: 10;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+            transform: translateX(0);
+            transition: transform 0.3s ease;
         }
-        #usernameInput {
-            padding: 5px;
-            border: none;
-            border-radius: 3px;
-            margin-right: 10px;
+        #sidebar.closed {
+            transform: translateX(-230px);
         }
-        #colorPicker {
-            width: 30px;
-            height: 30px;
-            border: none;
-            border-radius: 50%;
-            cursor: pointer;
-        }
-        #penSize {
-            width: 50px;
-            padding: 5px;
-        }
-        #clearBtn, #eraserBtn, #copyLinkBtn, #showUserBtn {
-            padding: 5px 10px;
+        #toggleSidebar {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 40px;
+            height: 40px;
             background-color: #555;
             color: white;
             border: none;
             border-radius: 3px;
             cursor: pointer;
+            font-size: 20px;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #sidebar.closed + #toggleSidebar {
+            left: 10px;
+        }
+        #usernameInput, #roomIdInput {
+            padding: 8px;
+            border: none;
+            border-radius: 3px;
+            font-size: 16px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #colorPicker {
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        #penSize {
+            width: 100%;
+            padding: 8px;
+        }
+        #clearBtn, #eraserBtn, #copyLinkBtn, #showUserBtn, #joinRoomBtn {
+            padding: 8px;
+            background-color: #555;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            box-sizing: border-box;
         }
         #eraserBtn.active, #showUserBtn.active {
             background-color: #777;
         }
-        #canvasContainer {
-            position: absolute;
-            top: 60px;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        #canvas {
-            border: 1px solid #ccc;
-            background-color: white;
-            cursor: crosshair;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            touch-action: none;
+        #penSizeValue {
+            font-size: 16px;
+            text-align: center;
         }
         #tooltip {
             position: fixed;
             display: none;
             background: black;
             color: white;
-            padding: 5px;
+            padding: 8px;
             border-radius: 3px;
             pointer-events: none;
-            z-index: 20;
-            font-size: 12px;
+            z-index: 30;
+            font-size: 14px;
             white-space: nowrap;
         }
         #instructions {
             position: fixed;
             bottom: 10px;
-            left: 10px;
+            right: 10px;
             background-color: rgba(0,0,0,0.7);
             color: white;
-            padding: 10px;
+            padding: 12px;
             border-radius: 5px;
-            font-size: 12px;
-            max-width: 300px;
+            font-size: 14px;
+            max-width: 90%;
             z-index: 10;
         }
         #closeInstructions {
@@ -103,22 +140,59 @@
             color: white;
             border: none;
             border-radius: 3px;
-            width: 20px;
-            height: 20px;
-            line-height: 20px;
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
             text-align: center;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 14px;
         }
         #closeInstructions:hover {
             background: #777;
         }
+        @media (max-width: 600px) {
+            #sidebar {
+                width: 200px;
+                padding: 10px;
+            }
+            #sidebar.closed {
+                transform: translateX(-180px);
+            }
+            #usernameInput, #roomIdInput {
+                font-size: 14px;
+                padding: 6px;
+            }
+            #clearBtn, #eraserBtn, #copyLinkBtn, #showUserBtn, #joinRoomBtn {
+                font-size: 14px;
+                padding: 6px;
+            }
+            #penSize {
+                width: 100%;
+            }
+            #penSizeValue {
+                font-size: 14px;
+            }
+            #instructions {
+                font-size: 12px;
+                padding: 10px;
+                max-width: 80%;
+            }
+            #toggleSidebar {
+                width: 36px;
+                height: 36px;
+                font-size: 18px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div id="toolbar">
+    <canvas id="canvas"></canvas>
+    <div id="sidebar">
         <label for="usernameInput">Username:</label>
         <input type="text" id="usernameInput" placeholder="Enter your username" maxlength="20">
+        <label for="roomIdInput">Room ID:</label>
+        <input type="text" id="roomIdInput" placeholder="Enter room ID">
+        <button id="joinRoomBtn">Join</button>
         <button id="copyLinkBtn">Copy Invite Link</button>
         <label for="colorPicker">Color:</label>
         <input type="color" id="colorPicker" value="#000000">
@@ -129,27 +203,30 @@
         <button id="showUserBtn">Show Users</button>
         <button id="clearBtn">Clear All</button>
     </div>
-    <div id="canvasContainer">
-        <canvas id="canvas" width="1200" height="800"></canvas>
-    </div>
+    <button id="toggleSidebar">></button>
     <div id="tooltip"></div>
     <div id="instructions">
         <button id="closeInstructions">X</button>
         <strong>Instructions:</strong><br>
-        - Drag with right-click or two fingers to pan, scroll/pinch to zoom.<br>
-        - Draw with mouse, touch, or stylus (pressure sensitivity where supported).<br>
-        - Copy invite link to share the canvas and join real-time drawing.<br>
-        - Paste received signaling data (offer/answer) in the prompt to connect.<br>
-        - Toggle "Show Users" to hover over strokes and see usernames in a tooltip.<br>
+        - Two-finger drag to pan, pinch to zoom.<br>
+        - Mouse draws with fixed width, pen/touch with pressure-sensitive width.<br>
+        - Tap sidebar button to show/hide controls.<br>
+        - Copy invite link to share canvas and room ID.<br>
+        - Paste room ID and tap "Join" to draw with others.<br>
+        - Toggle "Show Users" and tap-and-hold strokes to see usernames and input type.<br>
         - Eraser mode: Hold to remove strokes completely.<br>
-        - URL size limits shared data; keep drawings simple for sharing.
+        - URL size limits shared data; keep drawings simple.
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
+        const sidebar = document.getElementById('sidebar');
+        const toggleSidebar = document.getElementById('toggleSidebar');
         const usernameInput = document.getElementById('usernameInput');
+        const roomIdInput = document.getElementById('roomIdInput');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
         const colorPicker = document.getElementById('colorPicker');
         const penSizeSlider = document.getElementById('penSize');
         const penSizeValue = document.getElementById('penSizeValue');
@@ -168,12 +245,32 @@
         let currentColor = colorPicker.value;
         let currentSize = parseInt(penSizeSlider.value);
         let currentUsername = '';
+        let currentInputType = 'mouse';
         let strokes = [];
         let transform = { x: 0, y: 0, scale: 1 };
         let lastPan = { x: 0, y: 0 };
         let peers = [];
         let dataChannels = [];
         let sessionId = Math.random().toString(36).substring(2, 10);
+        let signalingData = { sessionId, candidates: [] };
+
+        // Set canvas size to full window
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            canvas.style.width = `${window.innerWidth}px`;
+            canvas.style.height = `${window.innerHeight}px`;
+            redrawAll();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Toggle sidebar
+        toggleSidebar.addEventListener('click', () => {
+            sidebar.classList.toggle('closed');
+            toggleSidebar.textContent = sidebar.classList.contains('closed') ? '>' : '<';
+        });
 
         // WebRTC setup
         function createPeerConnection() {
@@ -191,6 +288,11 @@
                     handlePeerMessage(msg);
                 };
                 dataChannels.push(channel);
+            };
+            peer.onicecandidate = (event) => {
+                if (event.candidate) {
+                    signalingData.candidates.push(event.candidate);
+                }
             };
             return peer;
         }
@@ -224,32 +326,35 @@
             peers.push(peer);
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
-            const signalingData = JSON.stringify({ sessionId, offer });
-            prompt('Copy this signaling data and send to your peer:', signalingData);
-            peer.onicecandidate = (event) => {
-                if (event.candidate) {
-                    const candidateData = JSON.stringify({ sessionId, candidate: event.candidate });
-                    prompt('Copy this ICE candidate and send to your peer:', candidateData);
-                }
-            };
+            signalingData.offer = offer;
+            const compressed = pako.deflate(JSON.stringify(signalingData), { to: 'string' });
+            const roomId = btoa(compressed);
+            return roomId;
         }
 
-        async function handleSignalingData() {
-            const data = prompt('Paste the signaling data from your peer:');
-            if (!data) return;
-            const { sessionId: receivedSessionId, offer, answer, candidate } = JSON.parse(data);
-            if (receivedSessionId !== sessionId) return;
-            const peer = createPeerConnection();
-            peers.push(peer);
-            if (offer) {
-                await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        async function joinConnection(roomId) {
+            try {
+                const decompressed = pako.inflate(atob(roomId), { to: 'string' });
+                const data = JSON.parse(decompressed);
+                if (data.sessionId !== sessionId) {
+                    alert('Invalid room ID');
+                    return;
+                }
+                const peer = createPeerConnection();
+                peers.push(peer);
+                await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await peer.createAnswer();
                 await peer.setLocalDescription(answer);
-                prompt('Copy this answer and send to your peer:', JSON.stringify({ sessionId, answer }));
-            } else if (answer) {
-                await peer.setRemoteDescription(new RTCSessionDescription(answer));
-            } else if (candidate) {
-                await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                signalingData.answer = answer;
+                data.candidates.forEach(async (candidate) => {
+                    await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                });
+                const compressed = pako.deflate(JSON.stringify(signalingData), { to: 'string' });
+                const newRoomId = btoa(compressed);
+                prompt('Copy this room ID and send to your peer:', newRoomId);
+            } catch (e) {
+                console.error('Failed to join room:', e);
+                alert('Failed to join room. Check the room ID.');
             }
         }
 
@@ -270,17 +375,18 @@
             const sid = urlParams.get('session');
             if (sid) {
                 sessionId = sid;
-                handleSignalingData();
+                roomIdInput.value = sid;
             }
         }
 
         // Save canvas state to URL
-        function saveToURL() {
+        async function saveToURL() {
             try {
                 const json = JSON.stringify(strokes);
                 const compressed = pako.deflate(json, { to: 'string' });
                 const encoded = btoa(compressed);
-                history.replaceState({}, '', `?state=${encodeURIComponent(encoded)}&session=${sessionId}`);
+                const roomId = await initiateConnection();
+                history.replaceState({}, '', `?state=${encodeURIComponent(encoded)}&session=${encodeURIComponent(roomId)}`);
             } catch (e) {
                 console.error('Failed to save canvas state:', e);
                 alert('Canvas state too large to share. Clear some drawings or simplify.');
@@ -288,17 +394,26 @@
         }
 
         // Copy invite link
-        copyLinkBtn.addEventListener('click', () => {
-            saveToURL();
-            initiateConnection();
+        copyLinkBtn.addEventListener('click', async () => {
+            await saveToURL();
             const link = window.location.href;
-            navigator.clipboard.writeText(link).then(() => alert('Invite link copied! Share with peers and exchange signaling data.'));
+            navigator.clipboard.writeText(link).then(() => alert('Invite link copied! Share with peers to draw together.'));
         });
 
-        // Apply canvas transform
-        function applyTransform() {
-            ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-        }
+        // Join room
+        joinRoomBtn.addEventListener('click', () => {
+            const roomId = roomIdInput.value.trim();
+            if (roomId) {
+                joinConnection(roomId);
+            } else {
+                alert('Please enter a room ID');
+            }
+        });
+
+        // Close instructions
+        closeInstructions.addEventListener('click', () => {
+            instructions.style.display = 'none';
+        });
 
         // Update pen size
         penSizeSlider.addEventListener('input', () => {
@@ -321,7 +436,13 @@
             isEraser = !isEraser;
             eraserBtn.classList.toggle('active', isEraser);
             eraserBtn.textContent = isEraser ? 'Pen' : 'Eraser';
-            canvas.style.cursor = isEraser ? 'grab' : 'crosshair';
+            updateCanvasCursor();
+        });
+
+        // Show users toggle
+        showUserBtn.addEventListener('click', () => {
+            showUsers = !showUsers;
+            showUserBtn.classList.toggle('active', showUsers);
         });
 
         // Clear all
@@ -331,6 +452,16 @@
             broadcastMessage({ type: 'clear' });
             history.replaceState({}, '', window.location.pathname);
         });
+
+        // Update canvas cursor
+        function updateCanvasCursor() {
+            canvas.classList.remove('mouse', 'pen', 'eraser');
+            if (isEraser) {
+                canvas.classList.add('eraser');
+            } else {
+                canvas.classList.add(currentInputType === 'pen' ? 'pen' : 'mouse');
+            }
+        }
 
         // Distance from point to line segment
         function distanceToLine(px, py, x1, y1, x2, y2) {
@@ -381,13 +512,26 @@
         }
 
         function getPressure(e) {
-            return e.pressure || 1;
+            if (e.pointerType === 'pen') {
+                return e.pressure || (e.touches && e.touches[0].force) || 0.5;
+            }
+            return 1.0; // Mouse and touch (no stylus) use fixed width
         }
 
         function startDrawing(e) {
-            if (e.button === 2 || (e.touches && e.touches.length > 1)) {
+            if (e.target !== canvas) return; // Ignore sidebar clicks
+            if (e.pointerType) {
+                currentInputType = e.pointerType;
+                updateCanvasCursor();
+            }
+            if (e.touches && e.touches.length > 1) {
                 isPanning = true;
-                lastPan = { x: e.clientX || e.touches[0].clientX, y: e.clientY || e.touches[0].clientY };
+                lastPan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                return;
+            }
+            if (e.button === 2) {
+                isPanning = true;
+                lastPan = { x: e.clientX, y: e.clientY };
                 return;
             }
             isDrawing = true;
@@ -400,10 +544,12 @@
             ctx.strokeStyle = currentColor;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
+            ctx.globalAlpha = currentInputType === 'pen' ? 0.9 : 1.0;
 
             if (!isEraser) {
                 const stroke = {
                     username: currentUsername,
+                    inputType: currentInputType,
                     color: currentColor,
                     points: [{ x, y, pressure }],
                     size: currentSize,
@@ -415,6 +561,11 @@
         }
 
         function draw(e) {
+            if (e.target !== canvas) return;
+            if (e.pointerType) {
+                currentInputType = e.pointerType;
+                updateCanvasCursor();
+            }
             if (isPanning) {
                 const clientX = e.clientX || (e.touches && e.touches[0].clientX);
                 const clientY = e.clientY || (e.touches && e.touches[0].clientY);
@@ -449,9 +600,12 @@
             } else {
                 ctx.lineTo(x, y);
                 ctx.lineWidth = currentSize * pressure;
+                ctx.strokeStyle = currentColor;
+                ctx.globalAlpha = currentInputType === 'pen' ? 0.9 : 1.0;
                 ctx.stroke();
                 const lastStroke = strokes[strokes.length - 1];
                 lastStroke.points.push({ x, y, pressure });
+                lastStroke.color = currentColor; // Update color in case it changed
                 broadcastMessage({ type: 'stroke', stroke: lastStroke });
             }
         }
@@ -462,10 +616,18 @@
                 return;
             }
             isDrawing = false;
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Apply canvas transform
+        function applyTransform() {
+            const dpr = window.devicePixelRatio || 1;
+            ctx.setTransform(transform.scale * dpr, 0, 0, transform.scale * dpr, transform.x * dpr, transform.y * dpr);
         }
 
         // Redraw all strokes
         function redrawAll() {
+            ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
             applyTransform();
             strokes.forEach(stroke => {
                 ctx.beginPath();
@@ -474,6 +636,7 @@
                 ctx.strokeStyle = stroke.color;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
+                ctx.globalAlpha = stroke.inputType === 'pen' ? 0.9 : 1.0;
                 stroke.points.forEach((point, i) => {
                     if (i === 0) return;
                     ctx.lineTo(point.x, point.y);
@@ -481,6 +644,7 @@
                     ctx.stroke();
                 });
             });
+            ctx.globalAlpha = 1.0;
         }
 
         // Handle hover for usernames
@@ -491,25 +655,94 @@
             }
             const { x, y } = getWorldCoords(e);
             let hoveredUser = null;
+            let inputType = null;
             for (let stroke of strokes) {
                 if (isPointNearStroke(x, y, stroke, 10 / transform.scale)) {
                     hoveredUser = stroke.username;
+                    inputType = stroke.inputType;
                     if (hoveredUser !== 'Anonymous') {
                         break;
                     }
                 }
             }
             if (hoveredUser && hoveredUser !== 'Anonymous') {
-                tooltip.textContent = hoveredUser;
+                tooltip.textContent = `${hoveredUser} (${inputType.charAt(0).toUpperCase() + inputType.slice(1)})`;
                 tooltip.style.display = 'block';
-                tooltip.style.left = (e.clientX + 10) + 'px';
-                tooltip.style.top = (e.clientY + 10) + 'px';
+                const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+                const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+                tooltip.style.left = (clientX + 10) + 'px';
+                tooltip.style.top = (clientY + 10) + 'px';
             } else {
                 tooltip.style.display = 'none';
             }
         }
 
-        // Zoom with mouse wheel
+        // Zoom with pinch gesture
+        let lastPinchDistance = null;
+        function handlePinch(e) {
+            if (e.touches && e.touches.length === 2) {
+                e.preventDefault();
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                const dx = touch1.clientX - touch2.clientX;
+                const dy = touch1.clientY - touch2.clientY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (lastPinchDistance) {
+                    const delta = distance - lastPinchDistance;
+                    const oldScale = transform.scale;
+                    transform.scale *= 1 + delta * 0.01;
+                    transform.scale = Math.max(0.1, Math.min(transform.scale, 10));
+                    const rect = canvas.getBoundingClientRect();
+                    const midX = (touch1.clientX + touch2.clientX) / 2 - rect.left;
+                    const midY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
+                    transform.x -= (midX / oldScale - midX / transform.scale) * transform.scale;
+                    transform.y -= (midY / oldScale - midY / transform.scale) * transform.scale;
+                    ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+                    redrawAll();
+                    broadcastMessage({ type: 'transform', transform });
+                }
+                lastPinchDistance = distance;
+            } else {
+                lastPinchDistance = null;
+            }
+        }
+
+        // Mouse and touch events
+        canvas.addEventListener('pointerdown', (e) => {
+            if (e.target !== canvas) return; // Ignore sidebar clicks
+            startDrawing(e);
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            if (e.target !== canvas) return;
+            draw(e);
+            handleHover(e);
+        });
+        canvas.addEventListener('pointerup', stopDrawing);
+        canvas.addEventListener('pointerleave', stopDrawing);
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.target !== canvas) return;
+            if (e.touches.length === 1) {
+                startDrawing(e);
+            } else if (e.touches.length === 2) {
+                startDrawing(e);
+            }
+        });
+        canvas.addEventListener('touchmove', (e) => {
+            if (e.target !== canvas) return;
+            if (e.touches.length === 1) {
+                draw(e);
+                handleHover(e);
+            } else if (e.touches.length === 2) {
+                handlePinch(e);
+            }
+        });
+        canvas.addEventListener('touchend', (e) => {
+            stopDrawing();
+            lastPinchDistance = null;
+        });
+
+        // Mouse wheel for desktop zoom
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zoomSpeed = 0.001;
@@ -526,39 +759,14 @@
             broadcastMessage({ type: 'transform', transform });
         });
 
-        // Mouse events
-        canvas.addEventListener('mousedown', startDrawing);
-        canvas.addEventListener('mousemove', (e) => {
-            draw(e);
-            handleHover(e);
-        });
-        canvas.addEventListener('mouseup', stopDrawing);
-        canvas.addEventListener('mouseout', stopDrawing);
-
-        // Touch events
-        canvas.addEventListener('touchstart', startDrawing);
-        canvas.addEventListener('touchmove', (e) => {
-            draw(e);
-            if (e.touches.length === 1) handleHover(e);
-        });
-        canvas.addEventListener('touchend', stopDrawing);
-
-        // Pointer events for stylus
-        canvas.addEventListener('pointerdown', startDrawing);
-        canvas.addEventListener('pointermove', (e) => {
-            draw(e);
-            handleHover(e);
-        });
-        canvas.addEventListener('pointerup', stopDrawing);
-        canvas.addEventListener('pointerleave', stopDrawing);
-
-        // Prevent scrolling
+        // Prevent default scrolling
         document.body.addEventListener('touchstart', (e) => { if (e.target === canvas) e.preventDefault(); });
-        document.body.addEventListener('touchend', (e) => { if (e.target === canvas) e.preventDefault(); });
         document.body.addEventListener('touchmove', (e) => { if (e.target === canvas) e.preventDefault(); });
+        document.body.addEventListener('touchend', (e) => { if (e.target === canvas) e.preventDefault(); });
 
         // Initialize
         currentUsername = usernameInput.value || 'Anonymous';
+        updateCanvasCursor();
         applyTransform();
         loadFromURL();
     </script>
