@@ -71,7 +71,7 @@
         #sidebar.closed + #toggleSidebar {
             left: 10px;
         }
-        #usernameInput, #roomIdInput {
+        #usernameInput, #roomIdInput, #customRoomId, #expireDays {
             padding: 8px;
             border: none;
             border-radius: 3px;
@@ -90,7 +90,7 @@
             width: 100%;
             padding: 8px;
         }
-        #clearBtn, #eraserBtn, #copyLinkBtn, #showUserBtn, #joinRoomBtn {
+        #clearBtn, #eraserBtn, #showUserBtn, #joinRoomBtn, #createRoomBtn, #createRoomSubmit, #createRoomCancel {
             padding: 8px;
             background-color: #555;
             color: white;
@@ -150,6 +150,28 @@
         #closeInstructions:hover {
             background: #777;
         }
+        #createRoomPopup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #333;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            width: 300px;
+            max-width: 90%;
+        }
+        #createRoomPopup label {
+            font-size: 16px;
+        }
+        #createRoomPopup button {
+            margin-top: 10px;
+        }
         @media (max-width: 600px) {
             #sidebar {
                 width: 200px;
@@ -158,11 +180,11 @@
             #sidebar.closed {
                 transform: translateX(-180px);
             }
-            #usernameInput, #roomIdInput {
+            #usernameInput, #roomIdInput, #customRoomId, #expireDays {
                 font-size: 14px;
                 padding: 6px;
             }
-            #clearBtn, #eraserBtn, #copyLinkBtn, #showUserBtn, #joinRoomBtn {
+            #clearBtn, #eraserBtn, #showUserBtn, #joinRoomBtn, #createRoomBtn, #createRoomSubmit, #createRoomCancel {
                 font-size: 14px;
                 padding: 6px;
             }
@@ -182,6 +204,9 @@
                 height: 36px;
                 font-size: 18px;
             }
+            #createRoomPopup {
+                width: 250px;
+            }
         }
     </style>
 </head>
@@ -193,7 +218,7 @@
         <label for="roomIdInput">Room ID:</label>
         <input type="text" id="roomIdInput" placeholder="Enter room ID">
         <button id="joinRoomBtn">Join</button>
-        <button id="copyLinkBtn">Copy Invite Link</button>
+        <button id="createRoomBtn">Create Room</button>
         <label for="colorPicker">Color:</label>
         <input type="color" id="colorPicker" value="#000000">
         <label for="penSize">Pen Size:</label>
@@ -211,17 +236,26 @@
         - Two-finger drag to pan, pinch to zoom.<br>
         - Mouse draws with fixed width, pen/touch with pressure-sensitive width.<br>
         - Tap sidebar button to show/hide controls.<br>
-        - Copy invite link to share room ID.<br>
+        - Create room with custom ID and expiration (up to 7 days).<br>
+        - Share room ID from Create Room or URL (e.g., ?room=customID).<br>
         - Paste room ID and tap "Join" to draw with others.<br>
         - Toggle "Show Users" and tap-and-hold strokes to see usernames and input type.<br>
         - Eraser mode: Hold to remove strokes completely.<br>
         - Canvas state stored in Firebase; keep drawings reasonable.
     </div>
+    <div id="createRoomPopup">
+        <label for="customRoomId">Custom Room ID (8-20 characters):</label>
+        <input type="text" id="customRoomId" placeholder="Enter custom room ID" maxlength="20">
+        <label for="expireDays">Expiration Days (1-7):</label>
+        <input type="number" id="expireDays" min="1" max="7" value="1">
+        <button id="createRoomSubmit">Create</button>
+        <button id="createRoomCancel">Cancel</button>
+    </div>
 
     <script type="module">
         // Firebase imports
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js';
-        import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
+        import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
         import { getAnalytics } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js';
 
         // Firebase configuration
@@ -247,16 +281,21 @@
         const usernameInput = document.getElementById('usernameInput');
         const roomIdInput = document.getElementById('roomIdInput');
         const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const createRoomBtn = document.getElementById('createRoomBtn');
         const colorPicker = document.getElementById('colorPicker');
         const penSizeSlider = document.getElementById('penSize');
         const penSizeValue = document.getElementById('penSizeValue');
         const eraserBtn = document.getElementById('eraserBtn');
         const clearBtn = document.getElementById('clearBtn');
-        const copyLinkBtn = document.getElementById('copyLinkBtn');
         const showUserBtn = document.getElementById('showUserBtn');
         const tooltip = document.getElementById('tooltip');
         const instructions = document.getElementById('instructions');
         const closeInstructions = document.getElementById('closeInstructions');
+        const createRoomPopup = document.getElementById('createRoomPopup');
+        const customRoomId = document.getElementById('customRoomId');
+        const expireDays = document.getElementById('expireDays');
+        const createRoomSubmit = document.getElementById('createRoomSubmit');
+        const createRoomCancel = document.getElementById('createRoomCancel');
 
         let isDrawing = false;
         let isPanning = false;
@@ -274,6 +313,7 @@
         let sessionId = Math.random().toString(36).substring(2, 10);
         let signalingData = { sessionId, candidates: [] };
         let currentRoomId = '';
+        let unsubscribeRoomListener = null;
 
         // Set canvas size to full window
         function resizeCanvas() {
@@ -295,19 +335,28 @@
 
         // WebRTC setup
         function createPeerConnection() {
-            const peer = new RTCPeerConnection();
+            const peer = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
             const dataChannel = peer.createDataChannel('drawing');
-            dataChannel.onopen = () => console.log('Data channel open');
+            dataChannel.onopen = () => {
+                console.log('Data channel open');
+                dataChannels.push(dataChannel);
+            };
             dataChannel.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 handlePeerMessage(msg);
             };
+            dataChannel.onerror = (error) => console.error('Data channel error:', error);
+            dataChannel.onclose = () => console.log('Data channel closed');
             peer.ondatachannel = (event) => {
                 const channel = event.channel;
                 channel.onmessage = (event) => {
                     const msg = JSON.parse(event.data);
                     handlePeerMessage(msg);
                 };
+                channel.onerror = (error) => console.error('Data channel error:', error);
+                channel.onclose = () => console.log('Data channel closed');
                 dataChannels.push(channel);
             };
             peer.onicecandidate = (event) => {
@@ -316,6 +365,12 @@
                     if (currentRoomId) {
                         updateRoomSignaling();
                     }
+                }
+            };
+            peer.onconnectionstatechange = () => {
+                console.log('Peer connection state:', peer.connectionState);
+                if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
+                    console.error('Peer connection failed or disconnected');
                 }
             };
             return peer;
@@ -356,26 +411,40 @@
         function broadcastMessage(msg) {
             dataChannels.forEach(channel => {
                 if (channel.readyState === 'open') {
-                    channel.send(JSON.stringify(msg));
+                    try {
+                        channel.send(JSON.stringify(msg));
+                    } catch (e) {
+                        console.error('Failed to send message:', e);
+                    }
                 }
             });
         }
 
-        async function initiateConnection() {
+        async function initiateConnection(customRoomId, expireDays) {
+            const roomId = customRoomId || Math.random().toString(36).substring(2, 10);
+            const roomDoc = await getDoc(doc(db, 'rooms', roomId));
+            if (roomDoc.exists()) {
+                alert('Room ID already exists. Please choose another.');
+                return null;
+            }
             const peer = createPeerConnection();
             peers.push(peer);
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
             signalingData.offer = offer;
-            const roomId = Math.random().toString(36).substring(2, 10);
             currentRoomId = roomId;
+            const expireDate = new Date();
+            expireDate.setDate(expireDate.getDate() + parseInt(expireDays));
             await setDoc(doc(db, 'rooms', roomId), {
                 signalingData: JSON.stringify(signalingData),
                 strokes: [],
                 transform: transform,
                 createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
+                updatedAt: serverTimestamp(),
+                expireAt: expireDate
             });
+            // Listen for peer signaling updates
+            setupRoomListener(roomId);
             return roomId;
         }
 
@@ -386,8 +455,13 @@
                     alert('Invalid room ID');
                     return;
                 }
-                currentRoomId = roomId;
                 const data = roomDoc.data();
+                const expireAt = data.expireAt?.toDate();
+                if (expireAt && expireAt < new Date()) {
+                    alert('This room has expired');
+                    return;
+                }
+                currentRoomId = roomId;
                 const signaling = JSON.parse(data.signalingData);
                 if (signaling.sessionId !== sessionId) {
                     const peer = createPeerConnection();
@@ -397,18 +471,47 @@
                     await peer.setLocalDescription(answer);
                     signalingData.answer = answer;
                     signaling.candidates.forEach(async (candidate) => {
-                        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                        try {
+                            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                        } catch (e) {
+                            console.error('Failed to add ICE candidate:', e);
+                        }
                     });
                     await updateRoomSignaling();
                     strokes = data.strokes || [];
                     transform = data.transform || { x: 0, y: 0, scale: 1 };
                     redrawAll();
+                    setupRoomListener(roomId);
                     prompt('Copy this room ID and send to your peer:', roomId);
                 }
             } catch (e) {
                 console.error('Failed to join room:', e);
-                alert('Failed to join room. Check the room ID.');
+                alert('Failed to join room. Check the room ID or expiration.');
             }
+        }
+
+        function setupRoomListener(roomId) {
+            if (unsubscribeRoomListener) {
+                unsubscribeRoomListener();
+            }
+            unsubscribeRoomListener = onSnapshot(doc(db, 'rooms', roomId), (doc) => {
+                if (!doc.exists()) return;
+                const data = doc.data();
+                const signaling = JSON.parse(data.signalingData);
+                if (signaling.sessionId !== sessionId && signaling.answer) {
+                    peers.forEach(async (peer) => {
+                        if (peer.connectionState === 'new' || peer.connectionState === 'connecting') {
+                            try {
+                                await peer.setRemoteDescription(new RTCSessionDescription(signaling.answer));
+                            } catch (e) {
+                                console.error('Failed to set remote description:', e);
+                            }
+                        }
+                    });
+                }
+            }, (error) => {
+                console.error('Room listener error:', error);
+            });
         }
 
         // Save canvas state to Firebase
@@ -434,12 +537,20 @@
                 try {
                     const roomDoc = await getDoc(doc(db, 'rooms', roomId));
                     if (roomDoc.exists()) {
+                        const data = roomDoc.data();
+                        const expireAt = data.expireAt?.toDate();
+                        if (expireAt && expireAt < new Date()) {
+                            alert('This room has expired');
+                            return;
+                        }
                         currentRoomId = roomId;
                         roomIdInput.value = roomId;
-                        const data = roomDoc.data();
                         strokes = data.strokes || [];
                         transform = data.transform || { x: 0, y: 0, scale: 1 };
                         redrawAll();
+                        joinConnection(roomId);
+                    } else {
+                        alert('Room not found');
                     }
                 } catch (e) {
                     console.error('Failed to load canvas state:', e);
@@ -447,13 +558,35 @@
             }
         }
 
-        // Copy invite link
-        copyLinkBtn.addEventListener('click', async () => {
-            if (!currentRoomId) {
-                currentRoomId = await initiateConnection();
+        // Create room popup
+        createRoomBtn.addEventListener('click', () => {
+            createRoomPopup.style.display = 'flex';
+            customRoomId.value = '';
+            expireDays.value = '1';
+        });
+
+        createRoomCancel.addEventListener('click', () => {
+            createRoomPopup.style.display = 'none';
+        });
+
+        createRoomSubmit.addEventListener('click', async () => {
+            const roomId = customRoomId.value.trim();
+            const days = parseInt(expireDays.value);
+            if (!roomId.match(/^[a-zA-Z0-9]{8,20}$/)) {
+                alert('Room ID must be 8-20 alphanumeric characters');
+                return;
             }
-            const link = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}`;
-            navigator.clipboard.writeText(link).then(() => alert('Invite link copied! Share with peers to draw together.'));
+            if (isNaN(days) || days < 1 || days > 7) {
+                alert('Expiration must be between 1 and 7 days');
+                return;
+            }
+            const newRoomId = await initiateConnection(roomId, days);
+            if (newRoomId) {
+                createRoomPopup.style.display = 'none';
+                roomIdInput.value = newRoomId;
+                history.replaceState({}, '', `?room=${encodeURIComponent(newRoomId)}`);
+                alert(`Room created! Share this room ID with peers: ${newRoomId}`);
+            }
         });
 
         // Join room
