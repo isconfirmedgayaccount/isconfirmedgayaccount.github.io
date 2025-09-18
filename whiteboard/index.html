@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Infinite Collaborative Whiteboard with Sidebar</title>
+    <title>Infinite Collaborative Whiteboard with Firebase</title>
     <style>
         body {
             margin: 0;
@@ -211,15 +211,35 @@
         - Two-finger drag to pan, pinch to zoom.<br>
         - Mouse draws with fixed width, pen/touch with pressure-sensitive width.<br>
         - Tap sidebar button to show/hide controls.<br>
-        - Copy invite link to share canvas and room ID.<br>
+        - Copy invite link to share room ID.<br>
         - Paste room ID and tap "Join" to draw with others.<br>
         - Toggle "Show Users" and tap-and-hold strokes to see usernames and input type.<br>
         - Eraser mode: Hold to remove strokes completely.<br>
-        - URL size limits shared data; keep drawings simple.
+        - Canvas state stored in Firebase; keep drawings reasonable.
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-    <script>
+    <script type="module">
+        // Firebase imports
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js';
+        import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
+        import { getAnalytics } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js';
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBJXd9TxJWe1qKtrQdNOOZbOiU9aoHYfw0",
+            authDomain: "whlteboard.firebaseapp.com",
+            projectId: "whlteboard",
+            storageBucket: "whlteboard.firebasestorage.app",
+            messagingSenderId: "817278448507",
+            appId: "1:817278448507:web:2b1d45e4c432d3f4a5c3de",
+            measurementId: "G-CWZ5FKTL4B"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        const db = getFirestore(app);
+
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const sidebar = document.getElementById('sidebar');
@@ -253,6 +273,7 @@
         let dataChannels = [];
         let sessionId = Math.random().toString(36).substring(2, 10);
         let signalingData = { sessionId, candidates: [] };
+        let currentRoomId = '';
 
         // Set canvas size to full window
         function resizeCanvas() {
@@ -292,23 +313,42 @@
             peer.onicecandidate = (event) => {
                 if (event.candidate) {
                     signalingData.candidates.push(event.candidate);
+                    if (currentRoomId) {
+                        updateRoomSignaling();
+                    }
                 }
             };
             return peer;
         }
 
+        async function updateRoomSignaling() {
+            if (!currentRoomId) return;
+            try {
+                await updateDoc(doc(db, 'rooms', currentRoomId), {
+                    signalingData: JSON.stringify(signalingData),
+                    updatedAt: serverTimestamp()
+                });
+            } catch (e) {
+                console.error('Failed to update signaling data:', e);
+            }
+        }
+
         function handlePeerMessage(msg) {
             if (msg.type === 'stroke') {
                 strokes.push(msg.stroke);
+                saveCanvasState();
                 redrawAll();
             } else if (msg.type === 'erase') {
                 strokes = strokes.filter((_, i) => !msg.indices.includes(i));
+                saveCanvasState();
                 redrawAll();
             } else if (msg.type === 'clear') {
                 strokes = [];
+                saveCanvasState();
                 ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
             } else if (msg.type === 'transform') {
                 transform = { ...msg.transform };
+                saveCanvasState();
                 redrawAll();
             }
         }
@@ -327,82 +367,92 @@
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
             signalingData.offer = offer;
-            const compressed = pako.deflate(JSON.stringify(signalingData), { to: 'string' });
-            const roomId = btoa(compressed);
+            const roomId = Math.random().toString(36).substring(2, 10);
+            currentRoomId = roomId;
+            await setDoc(doc(db, 'rooms', roomId), {
+                signalingData: JSON.stringify(signalingData),
+                strokes: [],
+                transform: transform,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+            });
             return roomId;
         }
 
         async function joinConnection(roomId) {
             try {
-                const decompressed = pako.inflate(atob(roomId), { to: 'string' });
-                const data = JSON.parse(decompressed);
-                if (data.sessionId !== sessionId) {
+                const roomDoc = await getDoc(doc(db, 'rooms', roomId));
+                if (!roomDoc.exists()) {
                     alert('Invalid room ID');
                     return;
                 }
-                const peer = createPeerConnection();
-                peers.push(peer);
-                await peer.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await peer.createAnswer();
-                await peer.setLocalDescription(answer);
-                signalingData.answer = answer;
-                data.candidates.forEach(async (candidate) => {
-                    await peer.addIceCandidate(new RTCIceCandidate(candidate));
-                });
-                const compressed = pako.deflate(JSON.stringify(signalingData), { to: 'string' });
-                const newRoomId = btoa(compressed);
-                prompt('Copy this room ID and send to your peer:', newRoomId);
+                currentRoomId = roomId;
+                const data = roomDoc.data();
+                const signaling = JSON.parse(data.signalingData);
+                if (signaling.sessionId !== sessionId) {
+                    const peer = createPeerConnection();
+                    peers.push(peer);
+                    await peer.setRemoteDescription(new RTCSessionDescription(signaling.offer));
+                    const answer = await peer.createAnswer();
+                    await peer.setLocalDescription(answer);
+                    signalingData.answer = answer;
+                    signaling.candidates.forEach(async (candidate) => {
+                        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                    });
+                    await updateRoomSignaling();
+                    strokes = data.strokes || [];
+                    transform = data.transform || { x: 0, y: 0, scale: 1 };
+                    redrawAll();
+                    prompt('Copy this room ID and send to your peer:', roomId);
+                }
             } catch (e) {
                 console.error('Failed to join room:', e);
                 alert('Failed to join room. Check the room ID.');
             }
         }
 
-        // Load canvas state from URL
-        function loadFromURL() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const state = urlParams.get('state');
-            if (state) {
-                try {
-                    const decoded = atob(state);
-                    const decompressed = pako.inflate(decoded, { to: 'string' });
-                    strokes = JSON.parse(decompressed);
-                    redrawAll();
-                } catch (e) {
-                    console.error('Failed to load canvas state:', e);
-                }
-            }
-            const sid = urlParams.get('session');
-            if (sid) {
-                sessionId = sid;
-                roomIdInput.value = sid;
+        // Save canvas state to Firebase
+        async function saveCanvasState() {
+            if (!currentRoomId) return;
+            try {
+                await updateDoc(doc(db, 'rooms', currentRoomId), {
+                    strokes: strokes.slice(-500), // Limit to 500 strokes
+                    transform: transform,
+                    updatedAt: serverTimestamp()
+                });
+            } catch (e) {
+                console.error('Failed to save canvas state:', e);
+                alert('Failed to save canvas state. Try clearing some drawings.');
             }
         }
 
-        // Save canvas state to URL with stroke limit
-        async function saveToURL() {
-            try {
-                // Limit to last 100 strokes to reduce URL length
-                const limitedStrokes = strokes.slice(-100);
-                const json = JSON.stringify(limitedStrokes);
-                const compressed = pako.deflate(json, { to: 'string' });
-                const encoded = btoa(compressed);
-                if (encoded.length > 1500) {
-                    alert('Canvas state too large to share. Clear some drawings or simplify.');
-                    return;
+        // Load canvas state from Firebase
+        async function loadFromFirebase() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            if (roomId) {
+                try {
+                    const roomDoc = await getDoc(doc(db, 'rooms', roomId));
+                    if (roomDoc.exists()) {
+                        currentRoomId = roomId;
+                        roomIdInput.value = roomId;
+                        const data = roomDoc.data();
+                        strokes = data.strokes || [];
+                        transform = data.transform || { x: 0, y: 0, scale: 1 };
+                        redrawAll();
+                    }
+                } catch (e) {
+                    console.error('Failed to load canvas state:', e);
                 }
-                const roomId = await initiateConnection();
-                history.replaceState({}, '', `?state=${encodeURIComponent(encoded)}&session=${encodeURIComponent(roomId)}`);
-            } catch (e) {
-                console.error('Failed to save canvas state:', e);
-                alert('Canvas state too large to share. Clear some drawings or simplify.');
             }
         }
 
         // Copy invite link
         copyLinkBtn.addEventListener('click', async () => {
-            await saveToURL();
-            const link = window.location.href;
+            if (!currentRoomId) {
+                currentRoomId = await initiateConnection();
+            }
+            const link = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}`;
             navigator.clipboard.writeText(link).then(() => alert('Invite link copied! Share with peers to draw together.'));
         });
 
@@ -411,6 +461,7 @@
             const roomId = roomIdInput.value.trim();
             if (roomId) {
                 joinConnection(roomId);
+                history.replaceState({}, '', `?room=${encodeURIComponent(roomId)}`);
             } else {
                 alert('Please enter a room ID');
             }
@@ -455,6 +506,7 @@
         clearBtn.addEventListener('click', () => {
             ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
             strokes = [];
+            saveCanvasState();
             broadcastMessage({ type: 'clear' });
             history.replaceState({}, '', window.location.pathname);
         });
@@ -514,6 +566,7 @@
             const clientY = e.clientY || (e.touches && e.touches[0].clientY);
             const x = (clientX - rect.left - transform.x) / transform.scale;
             const y = (clientY - rect.top - transform.y) / transform.scale;
+            console.log(`getWorldCoords: clientX=${clientX}, clientY=${clientY}, rect.left=${rect.left}, rect.top=${rect.top}, transform.x=${transform.x}, transform.y=${transform.y}, transform.scale=${transform.scale}, worldX=${x}, worldY=${y}`);
             return { x, y };
         }
 
@@ -521,11 +574,11 @@
             if (e.pointerType === 'pen') {
                 return e.pressure || (e.touches && e.touches[0].force) || 0.5;
             }
-            return 1.0; // Mouse and touch (no stylus) use fixed width
+            return 1.0;
         }
 
         function startDrawing(e) {
-            if (e.target !== canvas) return; // Ignore sidebar clicks
+            if (e.target !== canvas) return;
             if (e.pointerType) {
                 currentInputType = e.pointerType;
                 updateCanvasCursor();
@@ -562,6 +615,7 @@
                     isEraser: false
                 };
                 strokes.push(stroke);
+                saveCanvasState();
                 broadcastMessage({ type: 'stroke', stroke });
             }
         }
@@ -580,7 +634,8 @@
                 lastPan = { x: clientX, y: clientY };
                 ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
                 redrawAll();
-                broadcastMessage({ type: 'transform', transform });
+                saveCanvasState();
+                broadcastMessage({ type: 'transform', transform: { ...transform } });
                 return;
             }
             if (!isDrawing) return;
@@ -601,6 +656,7 @@
                 if (erasedIndices.length > 0) {
                     ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
                     redrawAll();
+                    saveCanvasState();
                     broadcastMessage({ type: 'erase', indices: erasedIndices });
                 }
             } else {
@@ -612,6 +668,7 @@
                 const lastStroke = strokes[strokes.length - 1];
                 lastStroke.points.push({ x, y, pressure });
                 lastStroke.color = currentColor;
+                saveCanvasState();
                 broadcastMessage({ type: 'stroke', stroke: lastStroke });
             }
         }
@@ -629,6 +686,7 @@
         function applyTransform() {
             const dpr = window.devicePixelRatio || 1;
             ctx.setTransform(transform.scale * dpr, 0, 0, transform.scale * dpr, transform.x * dpr, transform.y * dpr);
+            console.log(`applyTransform: scale=${transform.scale}, dpr=${dpr}, x=${transform.x}, y=${transform.y}`);
         }
 
         // Redraw all strokes
@@ -705,7 +763,8 @@
                     transform.y -= (midY / oldScale - midY / transform.scale) * transform.scale;
                     ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
                     redrawAll();
-                    broadcastMessage({ type: 'transform', transform });
+                    saveCanvasState();
+                    broadcastMessage({ type: 'transform', transform: { ...transform } });
                 }
                 lastPinchDistance = distance;
             } else {
@@ -762,7 +821,8 @@
             transform.y -= (mouseY / oldScale - mouseY / transform.scale) * transform.scale;
             ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
             redrawAll();
-            broadcastMessage({ type: 'transform', transform });
+            saveCanvasState();
+            broadcastMessage({ type: 'transform', transform: { ...transform } });
         });
 
         // Prevent default scrolling
@@ -774,7 +834,7 @@
         currentUsername = usernameInput.value || 'Anonymous';
         updateCanvasCursor();
         applyTransform();
-        loadFromURL();
+        loadFromFirebase();
     </script>
 </body>
 </html>
