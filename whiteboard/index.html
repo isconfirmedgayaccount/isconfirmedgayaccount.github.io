@@ -189,10 +189,27 @@
             padding: 2px 0;
             font-size: 14px;
             color: #ccc;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         .user-item.active {
             color: #fff;
             font-weight: bold;
+        }
+        .user-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid #666;
+        }
+        .user-status {
+            font-size: 10px;
+            color: #88ff88;
+            margin-left: auto;
+        }
+        .user-status.inactive {
+            color: #ff8888;
         }
         @media (max-width: 600px) {
             #sidebar {
@@ -262,7 +279,7 @@
         - Create room with custom ID and expiration (up to 7 days).<br>
         - Share room ID from Create Room or URL (e.g., ?room=customID).<br>
         - Paste room ID and tap "Join" to draw with others.<br>
-        - Toggle "Show Users" to see who's in the room.<br>
+        - Toggle "Show Users" to see who's in the room LIVE.<br>
         - Eraser mode: Hold to remove strokes completely.<br>
         - Canvas state stored in Firebase; keep drawings reasonable.
     </div>
@@ -287,8 +304,7 @@
             updateDoc, 
             serverTimestamp, 
             onSnapshot,
-            deleteDoc,
-            increment
+            deleteDoc
         } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
 
         // Firebase configuration
@@ -347,6 +363,7 @@
         let userStatusRef = null;
         let sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
         let activityInterval = null;
+        let lastUserUpdate = 0;
 
         // Set canvas size to full window
         function resizeCanvas() {
@@ -366,18 +383,46 @@
             toggleSidebar.textContent = sidebar.classList.contains('closed') ? '>' : '<';
         });
 
-        // Update user list
+        // Update user list with live status
         function updateUserList(users) {
+            const now = Date.now();
             userList.innerHTML = '';
-            const myUser = users.find(u => u.sessionId === sessionId);
+            
             users.forEach(user => {
+                const lastActiveTime = user.lastActive?.toDate() || 0;
+                const timeSinceActive = now - lastActiveTime;
+                const isActive = timeSinceActive < 5000; // 5 second timeout for "live"
+                const isRecent = timeSinceActive < 30000; // 30 second timeout for showing
+                
+                if (!isRecent) return; // Don't show users inactive for 30+ seconds
+                
                 const div = document.createElement('div');
                 div.className = `user-item ${user.sessionId === sessionId ? 'active' : ''}`;
-                div.textContent = user.username;
+                
+                const colorDot = document.createElement('div');
+                colorDot.className = 'user-color';
+                colorDot.style.backgroundColor = user.color || '#666';
+                
+                const usernameSpan = document.createElement('span');
+                usernameSpan.textContent = user.username;
+                
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'user-status';
+                statusSpan.textContent = isActive ? 'LIVE' : 'Away';
+                if (!isActive) {
+                    statusSpan.classList.add('inactive');
+                }
+                
+                div.appendChild(colorDot);
+                div.appendChild(usernameSpan);
+                div.appendChild(statusSpan);
                 userList.appendChild(div);
             });
-            if (showUsers) {
+            
+            if (showUsers && users.length > 0) {
                 userList.classList.add('active');
+            } else {
+                userList.classList.remove('active');
             }
         }
 
@@ -397,16 +442,18 @@
                 transform: { x: 0, y: 0, scale: 1 },
                 createdAt: serverTimestamp(),
                 expireAt: expireDate,
-                userCount: 1
+                userCount: 1,
+                lastActivity: serverTimestamp()
             });
 
-            // Create user status
+            // Create user status with immediate heartbeat
             await setDoc(doc(db, 'rooms', roomId, 'users', sessionId), {
                 username: currentUsername,
                 joinedAt: serverTimestamp(),
                 lastActive: serverTimestamp(),
-                color: currentColor
-            });
+                color: currentColor,
+                heartbeat: serverTimestamp()
+            }, { merge: true });
 
             return roomId;
         }
@@ -426,16 +473,18 @@
             // Get current user count and increment
             const currentCount = data.userCount || 0;
             await updateDoc(doc(db, 'rooms', roomId), {
-                userCount: currentCount + 1
+                userCount: currentCount + 1,
+                lastActivity: serverTimestamp()
             });
 
-            // Add user to room
+            // Add user to room with immediate heartbeat
             await setDoc(doc(db, 'rooms', roomId, 'users', sessionId), {
                 username: currentUsername,
                 joinedAt: serverTimestamp(),
                 lastActive: serverTimestamp(),
-                color: currentColor
-            });
+                color: currentColor,
+                heartbeat: serverTimestamp()
+            }, { merge: true });
 
             return data;
         }
@@ -475,6 +524,20 @@
             }
         }
 
+        // Update user heartbeat frequently for live status
+        async function updateHeartbeat() {
+            if (currentRoomId && userStatusRef) {
+                try {
+                    await updateDoc(userStatusRef, {
+                        lastActive: serverTimestamp(),
+                        heartbeat: serverTimestamp()
+                    });
+                } catch (error) {
+                    console.error('Failed to update heartbeat:', error);
+                }
+            }
+        }
+
         function setupRoomListeners(roomId, initialData) {
             // Listen to room strokes and transform
             unsubscribeRoomListener = onSnapshot(doc(db, 'rooms', roomId), (docSnap) => {
@@ -492,51 +555,91 @@
                 redrawAll();
             });
 
-            // Listen to users in room
+            // Listen to users in room - this will update in REAL TIME
             const usersCollection = collection(db, 'rooms', roomId, 'users');
             unsubscribeUsersListener = onSnapshot(usersCollection, (snapshot) => {
+                const now = Date.now();
                 const users = [];
+                
                 snapshot.forEach((doc) => {
                     const userData = doc.data();
-                    if (userData.lastActive?.toDate() > new Date(Date.now() - 30000)) { // 30s timeout
+                    const lastHeartbeat = userData.heartbeat?.toDate() || 0;
+                    const timeSinceHeartbeat = now - lastHeartbeat;
+                    
+                    // Show users who have heartbeated within 30 seconds
+                    if (timeSinceHeartbeat < 30000) {
                         users.push({
                             sessionId: doc.id,
-                            username: userData.username,
-                            color: userData.color
+                            username: userData.username || 'Unknown',
+                            color: userData.color || '#666',
+                            lastActive: userData.lastActive,
+                            heartbeat: userData.heartbeat
                         });
                     }
                 });
+                
+                // Sort by most recent activity
+                users.sort((a, b) => {
+                    const timeA = a.heartbeat?.toDate() || 0;
+                    const timeB = b.heartbeat?.toDate() || 0;
+                    return timeB - timeA;
+                });
+                
                 updateUserList(users);
+                lastUserUpdate = now;
             }, (error) => {
                 console.error('Users listener error:', error);
             });
 
-            // Update user activity every 10 seconds
+            // Update user activity every 2 seconds for live status
             if (activityInterval) clearInterval(activityInterval);
-            activityInterval = setInterval(() => {
-                if (currentRoomId && userStatusRef) {
-                    updateDoc(userStatusRef, {
-                        lastActive: serverTimestamp()
-                    }).catch(console.error);
+            activityInterval = setInterval(updateHeartbeat, 2000);
+
+            // Also update on mouse movement for immediate response
+            let lastActivity = Date.now();
+            const activityTimeout = setInterval(() => {
+                if (Date.now() - lastActivity > 5000) {
+                    updateHeartbeat();
                 }
-            }, 10000);
+            }, 1000);
+
+            // Track user activity
+            const trackActivity = () => {
+                lastActivity = Date.now();
+            };
+
+            canvas.addEventListener('mousemove', trackActivity);
+            canvas.addEventListener('touchmove', trackActivity);
+            document.addEventListener('keydown', trackActivity);
 
             // Clean up on page unload
-            window.addEventListener('beforeunload', leaveRoom);
+            window.addEventListener('beforeunload', () => {
+                clearInterval(activityTimeout);
+                leaveRoom();
+            });
         }
 
-        // Save canvas state to Firebase
-        async function saveCanvasState() {
+        // Save canvas state to Firebase with debouncing
+        let saveTimeout = null;
+        function saveCanvasState() {
             if (!currentRoomId) return;
-            try {
-                await updateDoc(doc(db, 'rooms', currentRoomId), {
-                    strokes: strokes.slice(-1000), // Limit to 1000 strokes
-                    transform: { ...transform },
-                    updatedAt: serverTimestamp()
-                });
-            } catch (e) {
-                console.error('Failed to save canvas state:', e);
+            
+            if (saveTimeout) {
+                clearTimeout(saveTimeout);
             }
+            
+            saveTimeout = setTimeout(async () => {
+                try {
+                    await updateDoc(doc(db, 'rooms', currentRoomId), {
+                        strokes: strokes.slice(-1000), // Limit to 1000 strokes
+                        transform: { ...transform },
+                        updatedAt: serverTimestamp(),
+                        lastActivity: serverTimestamp()
+                    });
+                } catch (e) {
+                    console.error('Failed to save canvas state:', e);
+                }
+            }, 100); // Debounce saves to 100ms
         }
 
         // Load from URL parameter
@@ -587,7 +690,6 @@
                 alert(`Room created! Share this room ID: ${newRoomId}`);
                 showUserBtn.classList.add('active');
                 showUsers = true;
-                updateUserList([{ sessionId, username: currentUsername }]);
             } catch (error) {
                 alert(error.message);
             }
@@ -642,7 +744,7 @@
         // Color change
         colorPicker.addEventListener('change', () => {
             currentColor = colorPicker.value;
-            // Update user color in room
+            // Update user color in room immediately
             if (currentRoomId && userStatusRef) {
                 updateDoc(userStatusRef, { color: currentColor }).catch(console.error);
             }
@@ -651,7 +753,7 @@
         // Username change
         usernameInput.addEventListener('input', () => {
             currentUsername = usernameInput.value || 'Anonymous';
-            // Update username in room
+            // Update username in room immediately
             if (currentRoomId && userStatusRef) {
                 updateDoc(userStatusRef, { username: currentUsername }).catch(console.error);
             }
@@ -675,18 +777,25 @@
         // Clear all
         clearBtn.addEventListener('click', async () => {
             if (!currentRoomId) {
-                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
                 strokes = [];
                 return;
             }
             try {
                 await updateDoc(doc(db, 'rooms', currentRoomId), {
                     strokes: [],
-                    updatedAt: serverTimestamp()
+                    updatedAt: serverTimestamp(),
+                    lastActivity: serverTimestamp()
                 });
                 // Local clear
                 strokes = [];
-                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
             } catch (error) {
                 console.error('Failed to clear canvas:', error);
             }
@@ -814,22 +923,22 @@
 
             if (isEraser) {
                 const eraserRadius = currentSize * 2 / transform.scale;
-                const erasedStrokes = [];
+                let strokesChanged = false;
                 strokes = strokes.filter((stroke) => {
                     if (isPointNearStroke(x, y, stroke, eraserRadius)) {
-                        erasedStrokes.push(stroke.id);
+                        strokesChanged = true;
                         return false;
                     }
                     return true;
                 });
-                if (erasedStrokes.length > 0) {
+                if (strokesChanged) {
                     saveCanvasState();
                 }
             } else {
                 const lastStroke = strokes[strokes.length - 1];
                 if (lastStroke) {
                     lastStroke.points.push({ x, y, pressure });
-                    // Draw locally
+                    // Draw locally for immediate feedback
                     ctx.save();
                     applyTransform();
                     ctx.beginPath();
@@ -863,11 +972,13 @@
 
         // Redraw all strokes
         function redrawAll() {
+            // Clear canvas properly
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.restore();
             
+            // Apply transform and draw strokes
             ctx.save();
             applyTransform();
             
@@ -884,9 +995,15 @@
                 
                 for (let i = 1; i < stroke.points.length; i++) {
                     ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-                    ctx.lineWidth = stroke.size * stroke.points[i].pressure;
-                    ctx.stroke();
+                    // Update line width for pressure sensitivity
+                    if (i < stroke.points.length - 1) {
+                        ctx.lineWidth = stroke.size * stroke.points[i].pressure;
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(stroke.points[i].x, stroke.points[i].y);
+                    }
                 }
+                ctx.stroke();
             });
             
             ctx.globalAlpha = 1.0;
@@ -960,7 +1077,6 @@
         
         canvas.addEventListener('pointermove', (e) => {
             if (e.target !== canvas) return;
-            e.preventDefault();
             draw(e);
             handleHover(e);
         });
@@ -971,7 +1087,6 @@
         });
         
         canvas.addEventListener('pointerleave', (e) => {
-            e.preventDefault();
             stopDrawing();
         });
 
@@ -1034,15 +1149,8 @@
         updateCanvasCursor();
         loadFromUrl();
 
-        // Cleanup on page unload (make sure it's only added once)
-        let cleanupAdded = false;
-        function addCleanup() {
-            if (!cleanupAdded) {
-                window.addEventListener('beforeunload', leaveRoom);
-                cleanupAdded = true;
-            }
-        }
-        addCleanup();
+        // Initial heartbeat update
+        setTimeout(updateHeartbeat, 1000);
     </script>
 </body>
 </html>
