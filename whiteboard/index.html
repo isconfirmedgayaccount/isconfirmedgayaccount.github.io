@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Whiteboard - errorrail.is-confirmed.gay</title>
+    <title>Infinite Collaborative Whiteboard with Firebase</title>
     <style>
         body {
             margin: 0;
@@ -288,7 +288,7 @@
             serverTimestamp, 
             onSnapshot,
             deleteDoc,
-            FieldValue
+            increment
         } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
 
         // Firebase configuration
@@ -346,6 +346,7 @@
         let unsubscribeUsersListener = null;
         let userStatusRef = null;
         let sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+        let activityInterval = null;
 
         // Set canvas size to full window
         function resizeCanvas() {
@@ -422,9 +423,10 @@
                 throw new Error('Room has expired');
             }
 
-            // Update user count
+            // Get current user count and increment
+            const currentCount = data.userCount || 0;
             await updateDoc(doc(db, 'rooms', roomId), {
-                userCount: FieldValue.increment(1)
+                userCount: currentCount + 1
             });
 
             // Add user to room
@@ -442,19 +444,29 @@
             if (!currentRoomId || !userStatusRef) return;
 
             try {
-                // Update user count
-                await updateDoc(doc(db, 'rooms', currentRoomId), {
-                    userCount: FieldValue.increment(-1)
-                });
+                // Get current user count and decrement
+                const roomDoc = await getDoc(doc(db, 'rooms', currentRoomId));
+                const currentCount = roomDoc.data().userCount || 0;
+                
+                if (currentCount > 0) {
+                    await updateDoc(doc(db, 'rooms', currentRoomId), {
+                        userCount: Math.max(0, currentCount - 1)
+                    });
+                }
 
                 // Remove user status
                 await deleteDoc(userStatusRef);
 
-                // Clean up listeners
+                // Clean up listeners and interval
                 if (unsubscribeRoomListener) unsubscribeRoomListener();
                 if (unsubscribeUsersListener) unsubscribeUsersListener();
+                if (activityInterval) {
+                    clearInterval(activityInterval);
+                    activityInterval = null;
+                }
                 
                 currentRoomId = '';
+                userStatusRef = null;
                 strokes = [];
                 transform = { x: 0, y: 0, scale: 1 };
                 redrawAll();
@@ -500,19 +512,17 @@
             });
 
             // Update user activity every 10 seconds
-            const activityInterval = setInterval(() => {
+            if (activityInterval) clearInterval(activityInterval);
+            activityInterval = setInterval(() => {
                 if (currentRoomId && userStatusRef) {
                     updateDoc(userStatusRef, {
                         lastActive: serverTimestamp()
-                    });
+                    }).catch(console.error);
                 }
             }, 10000);
 
-            // Clean up interval on page unload
-            window.addEventListener('beforeunload', () => {
-                clearInterval(activityInterval);
-                leaveRoom();
-            });
+            // Clean up on page unload
+            window.addEventListener('beforeunload', leaveRoom);
         }
 
         // Save canvas state to Firebase
@@ -571,6 +581,7 @@
                 history.replaceState({}, '', `?room=${encodeURIComponent(newRoomId)}`);
                 
                 // Setup listeners
+                userStatusRef = doc(db, 'rooms', newRoomId, 'users', sessionId);
                 setupRoomListeners(newRoomId, { strokes: [], transform });
                 
                 alert(`Room created! Share this room ID: ${newRoomId}`);
@@ -633,7 +644,7 @@
             currentColor = colorPicker.value;
             // Update user color in room
             if (currentRoomId && userStatusRef) {
-                updateDoc(userStatusRef, { color: currentColor });
+                updateDoc(userStatusRef, { color: currentColor }).catch(console.error);
             }
         });
 
@@ -642,7 +653,7 @@
             currentUsername = usernameInput.value || 'Anonymous';
             // Update username in room
             if (currentRoomId && userStatusRef) {
-                updateDoc(userStatusRef, { username: currentUsername });
+                updateDoc(userStatusRef, { username: currentUsername }).catch(console.error);
             }
         });
 
@@ -1023,8 +1034,15 @@
         updateCanvasCursor();
         loadFromUrl();
 
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', leaveRoom);
+        // Cleanup on page unload (make sure it's only added once)
+        let cleanupAdded = false;
+        function addCleanup() {
+            if (!cleanupAdded) {
+                window.addEventListener('beforeunload', leaveRoom);
+                cleanupAdded = true;
+            }
+        }
+        addCleanup();
     </script>
 </body>
 </html>
