@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Infinite Collaborative Whiteboard with Firebase</title>
+    <title>Whiteboard - errorrail.is-confirmed.gay</title>
     <style>
         body {
             margin: 0;
@@ -68,9 +68,6 @@
             align-items: center;
             justify-content: center;
         }
-        #sidebar.closed + #toggleSidebar {
-            left: 10px;
-        }
         #usernameInput, #roomIdInput, #customRoomId, #expireDays {
             padding: 8px;
             border: none;
@@ -78,6 +75,11 @@
             font-size: 16px;
             width: 100%;
             box-sizing: border-box;
+            background: #555;
+            color: white;
+        }
+        #usernameInput::placeholder, #roomIdInput::placeholder, #customRoomId::placeholder {
+            color: #aaa;
         }
         #colorPicker {
             width: 44px;
@@ -172,6 +174,26 @@
         #createRoomPopup button {
             margin-top: 10px;
         }
+        #userList {
+            background: #444;
+            padding: 10px;
+            border-radius: 3px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        #userList.active {
+            display: block;
+        }
+        .user-item {
+            padding: 2px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+        .user-item.active {
+            color: #fff;
+            font-weight: bold;
+        }
         @media (max-width: 600px) {
             #sidebar {
                 width: 200px;
@@ -214,10 +236,10 @@
     <canvas id="canvas"></canvas>
     <div id="sidebar">
         <label for="usernameInput">Username:</label>
-        <input type="text" id="usernameInput" placeholder="Enter your username" maxlength="20">
+        <input type="text" id="usernameInput" placeholder="Enter your username" maxlength="20" value="User">
         <label for="roomIdInput">Room ID:</label>
         <input type="text" id="roomIdInput" placeholder="Enter room ID">
-        <button id="joinRoomBtn">Join</button>
+        <button id="joinRoomBtn">Join Room</button>
         <button id="createRoomBtn">Create Room</button>
         <label for="colorPicker">Color:</label>
         <input type="color" id="colorPicker" value="#000000">
@@ -226,6 +248,7 @@
         <span id="penSizeValue">5</span>
         <button id="eraserBtn">Eraser</button>
         <button id="showUserBtn">Show Users</button>
+        <div id="userList"></div>
         <button id="clearBtn">Clear All</button>
     </div>
     <button id="toggleSidebar">></button>
@@ -239,7 +262,7 @@
         - Create room with custom ID and expiration (up to 7 days).<br>
         - Share room ID from Create Room or URL (e.g., ?room=customID).<br>
         - Paste room ID and tap "Join" to draw with others.<br>
-        - Toggle "Show Users" and tap-and-hold strokes to see usernames and input type.<br>
+        - Toggle "Show Users" to see who's in the room.<br>
         - Eraser mode: Hold to remove strokes completely.<br>
         - Canvas state stored in Firebase; keep drawings reasonable.
     </div>
@@ -255,8 +278,18 @@
     <script type="module">
         // Firebase imports
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js';
-        import { getFirestore, collection, doc, setDoc, getDoc, updateDoc, serverTimestamp, onSnapshot } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
-        import { getAnalytics } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js';
+        import { 
+            getFirestore, 
+            collection, 
+            doc, 
+            setDoc, 
+            getDoc, 
+            updateDoc, 
+            serverTimestamp, 
+            onSnapshot,
+            deleteDoc,
+            FieldValue
+        } from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
 
         // Firebase configuration
         const firebaseConfig = {
@@ -271,7 +304,6 @@
 
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
         const db = getFirestore(app);
 
         const canvas = document.getElementById('canvas');
@@ -296,6 +328,7 @@
         const expireDays = document.getElementById('expireDays');
         const createRoomSubmit = document.getElementById('createRoomSubmit');
         const createRoomCancel = document.getElementById('createRoomCancel');
+        const userList = document.getElementById('userList');
 
         let isDrawing = false;
         let isPanning = false;
@@ -303,17 +336,16 @@
         let showUsers = false;
         let currentColor = colorPicker.value;
         let currentSize = parseInt(penSizeSlider.value);
-        let currentUsername = '';
+        let currentUsername = usernameInput.value || 'Anonymous';
         let currentInputType = 'mouse';
         let strokes = [];
         let transform = { x: 0, y: 0, scale: 1 };
         let lastPan = { x: 0, y: 0 };
-        let peers = [];
-        let dataChannels = [];
-        let sessionId = Math.random().toString(36).substring(2, 10);
-        let signalingData = { sessionId, candidates: [] };
         let currentRoomId = '';
         let unsubscribeRoomListener = null;
+        let unsubscribeUsersListener = null;
+        let userStatusRef = null;
+        let sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
 
         // Set canvas size to full window
         function resizeCanvas() {
@@ -333,184 +365,153 @@
             toggleSidebar.textContent = sidebar.classList.contains('closed') ? '>' : '<';
         });
 
-        // WebRTC setup
-        function createPeerConnection() {
-            const peer = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        // Update user list
+        function updateUserList(users) {
+            userList.innerHTML = '';
+            const myUser = users.find(u => u.sessionId === sessionId);
+            users.forEach(user => {
+                const div = document.createElement('div');
+                div.className = `user-item ${user.sessionId === sessionId ? 'active' : ''}`;
+                div.textContent = user.username;
+                userList.appendChild(div);
             });
-            const dataChannel = peer.createDataChannel('drawing');
-            dataChannel.onopen = () => {
-                console.log('Data channel open');
-                dataChannels.push(dataChannel);
-            };
-            dataChannel.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                handlePeerMessage(msg);
-            };
-            dataChannel.onerror = (error) => console.error('Data channel error:', error);
-            dataChannel.onclose = () => console.log('Data channel closed');
-            peer.ondatachannel = (event) => {
-                const channel = event.channel;
-                channel.onmessage = (event) => {
-                    const msg = JSON.parse(event.data);
-                    handlePeerMessage(msg);
-                };
-                channel.onerror = (error) => console.error('Data channel error:', error);
-                channel.onclose = () => console.log('Data channel closed');
-                dataChannels.push(channel);
-            };
-            peer.onicecandidate = (event) => {
-                if (event.candidate) {
-                    signalingData.candidates.push(event.candidate);
-                    if (currentRoomId) {
-                        updateRoomSignaling();
-                    }
-                }
-            };
-            peer.onconnectionstatechange = () => {
-                console.log('Peer connection state:', peer.connectionState);
-                if (peer.connectionState === 'failed' || peer.connectionState === 'disconnected') {
-                    console.error('Peer connection failed or disconnected');
-                }
-            };
-            return peer;
-        }
-
-        async function updateRoomSignaling() {
-            if (!currentRoomId) return;
-            try {
-                await updateDoc(doc(db, 'rooms', currentRoomId), {
-                    signalingData: JSON.stringify(signalingData),
-                    updatedAt: serverTimestamp()
-                });
-            } catch (e) {
-                console.error('Failed to update signaling data:', e);
+            if (showUsers) {
+                userList.classList.add('active');
             }
         }
 
-        function handlePeerMessage(msg) {
-            if (msg.type === 'stroke') {
-                strokes.push(msg.stroke);
-                saveCanvasState();
-                redrawAll();
-            } else if (msg.type === 'erase') {
-                strokes = strokes.filter((_, i) => !msg.indices.includes(i));
-                saveCanvasState();
-                redrawAll();
-            } else if (msg.type === 'clear') {
-                strokes = [];
-                saveCanvasState();
-                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-            } else if (msg.type === 'transform') {
-                transform = { ...msg.transform };
-                saveCanvasState();
-                redrawAll();
-            }
-        }
-
-        function broadcastMessage(msg) {
-            dataChannels.forEach(channel => {
-                if (channel.readyState === 'open') {
-                    try {
-                        channel.send(JSON.stringify(msg));
-                    } catch (e) {
-                        console.error('Failed to send message:', e);
-                    }
-                }
-            });
-        }
-
-        async function initiateConnection(customRoomId, expireDays) {
-            const roomId = customRoomId || Math.random().toString(36).substring(2, 10);
+        // Firebase room operations
+        async function createRoom(customRoomId, expireDays) {
+            const roomId = customRoomId || Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
             const roomDoc = await getDoc(doc(db, 'rooms', roomId));
             if (roomDoc.exists()) {
-                alert('Room ID already exists. Please choose another.');
-                return null;
+                throw new Error('Room ID already exists');
             }
-            const peer = createPeerConnection();
-            peers.push(peer);
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            signalingData.offer = offer;
-            currentRoomId = roomId;
+
             const expireDate = new Date();
             expireDate.setDate(expireDate.getDate() + parseInt(expireDays));
+
             await setDoc(doc(db, 'rooms', roomId), {
-                signalingData: JSON.stringify(signalingData),
                 strokes: [],
-                transform: transform,
+                transform: { x: 0, y: 0, scale: 1 },
                 createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                expireAt: expireDate
+                expireAt: expireDate,
+                userCount: 1
             });
-            // Listen for peer signaling updates
-            setupRoomListener(roomId);
+
+            // Create user status
+            await setDoc(doc(db, 'rooms', roomId, 'users', sessionId), {
+                username: currentUsername,
+                joinedAt: serverTimestamp(),
+                lastActive: serverTimestamp(),
+                color: currentColor
+            });
+
             return roomId;
         }
 
-        async function joinConnection(roomId) {
+        async function joinRoom(roomId) {
+            const roomDoc = await getDoc(doc(db, 'rooms', roomId));
+            if (!roomDoc.exists()) {
+                throw new Error('Room not found');
+            }
+
+            const data = roomDoc.data();
+            const expireAt = data.expireAt?.toDate();
+            if (expireAt && expireAt < new Date()) {
+                throw new Error('Room has expired');
+            }
+
+            // Update user count
+            await updateDoc(doc(db, 'rooms', roomId), {
+                userCount: FieldValue.increment(1)
+            });
+
+            // Add user to room
+            await setDoc(doc(db, 'rooms', roomId, 'users', sessionId), {
+                username: currentUsername,
+                joinedAt: serverTimestamp(),
+                lastActive: serverTimestamp(),
+                color: currentColor
+            });
+
+            return data;
+        }
+
+        async function leaveRoom() {
+            if (!currentRoomId || !userStatusRef) return;
+
             try {
-                const roomDoc = await getDoc(doc(db, 'rooms', roomId));
-                if (!roomDoc.exists()) {
-                    alert('Invalid room ID');
-                    return;
-                }
-                const data = roomDoc.data();
-                const expireAt = data.expireAt?.toDate();
-                if (expireAt && expireAt < new Date()) {
-                    alert('This room has expired');
-                    return;
-                }
-                currentRoomId = roomId;
-                const signaling = JSON.parse(data.signalingData);
-                if (signaling.sessionId !== sessionId) {
-                    const peer = createPeerConnection();
-                    peers.push(peer);
-                    await peer.setRemoteDescription(new RTCSessionDescription(signaling.offer));
-                    const answer = await peer.createAnswer();
-                    await peer.setLocalDescription(answer);
-                    signalingData.answer = answer;
-                    signaling.candidates.forEach(async (candidate) => {
-                        try {
-                            await peer.addIceCandidate(new RTCIceCandidate(candidate));
-                        } catch (e) {
-                            console.error('Failed to add ICE candidate:', e);
-                        }
-                    });
-                    await updateRoomSignaling();
-                    strokes = data.strokes || [];
-                    transform = data.transform || { x: 0, y: 0, scale: 1 };
-                    redrawAll();
-                    setupRoomListener(roomId);
-                    prompt('Copy this room ID and send to your peer:', roomId);
-                }
-            } catch (e) {
-                console.error('Failed to join room:', e);
-                alert('Failed to join room. Check the room ID or expiration.');
+                // Update user count
+                await updateDoc(doc(db, 'rooms', currentRoomId), {
+                    userCount: FieldValue.increment(-1)
+                });
+
+                // Remove user status
+                await deleteDoc(userStatusRef);
+
+                // Clean up listeners
+                if (unsubscribeRoomListener) unsubscribeRoomListener();
+                if (unsubscribeUsersListener) unsubscribeUsersListener();
+                
+                currentRoomId = '';
+                strokes = [];
+                transform = { x: 0, y: 0, scale: 1 };
+                redrawAll();
+            } catch (error) {
+                console.error('Error leaving room:', error);
             }
         }
 
-        function setupRoomListener(roomId) {
-            if (unsubscribeRoomListener) {
-                unsubscribeRoomListener();
-            }
-            unsubscribeRoomListener = onSnapshot(doc(db, 'rooms', roomId), (doc) => {
-                if (!doc.exists()) return;
-                const data = doc.data();
-                const signaling = JSON.parse(data.signalingData);
-                if (signaling.sessionId !== sessionId && signaling.answer) {
-                    peers.forEach(async (peer) => {
-                        if (peer.connectionState === 'new' || peer.connectionState === 'connecting') {
-                            try {
-                                await peer.setRemoteDescription(new RTCSessionDescription(signaling.answer));
-                            } catch (e) {
-                                console.error('Failed to set remote description:', e);
-                            }
-                        }
+        function setupRoomListeners(roomId, initialData) {
+            // Listen to room strokes and transform
+            unsubscribeRoomListener = onSnapshot(doc(db, 'rooms', roomId), (docSnap) => {
+                if (!docSnap.exists()) {
+                    leaveRoom();
+                    return;
+                }
+                const data = docSnap.data();
+                if (data.strokes) {
+                    strokes = data.strokes;
+                }
+                if (data.transform) {
+                    transform = data.transform;
+                }
+                redrawAll();
+            });
+
+            // Listen to users in room
+            const usersCollection = collection(db, 'rooms', roomId, 'users');
+            unsubscribeUsersListener = onSnapshot(usersCollection, (snapshot) => {
+                const users = [];
+                snapshot.forEach((doc) => {
+                    const userData = doc.data();
+                    if (userData.lastActive?.toDate() > new Date(Date.now() - 30000)) { // 30s timeout
+                        users.push({
+                            sessionId: doc.id,
+                            username: userData.username,
+                            color: userData.color
+                        });
+                    }
+                });
+                updateUserList(users);
+            }, (error) => {
+                console.error('Users listener error:', error);
+            });
+
+            // Update user activity every 10 seconds
+            const activityInterval = setInterval(() => {
+                if (currentRoomId && userStatusRef) {
+                    updateDoc(userStatusRef, {
+                        lastActive: serverTimestamp()
                     });
                 }
-            }, (error) => {
-                console.error('Room listener error:', error);
+            }, 10000);
+
+            // Clean up interval on page unload
+            window.addEventListener('beforeunload', () => {
+                clearInterval(activityInterval);
+                leaveRoom();
             });
         }
 
@@ -519,46 +520,26 @@
             if (!currentRoomId) return;
             try {
                 await updateDoc(doc(db, 'rooms', currentRoomId), {
-                    strokes: strokes.slice(-500), // Limit to 500 strokes
-                    transform: transform,
+                    strokes: strokes.slice(-1000), // Limit to 1000 strokes
+                    transform: { ...transform },
                     updatedAt: serverTimestamp()
                 });
             } catch (e) {
                 console.error('Failed to save canvas state:', e);
-                alert('Failed to save canvas state. Try clearing some drawings.');
             }
         }
 
-        // Load canvas state from Firebase
-        async function loadFromFirebase() {
+        // Load from URL parameter
+        async function loadFromUrl() {
             const urlParams = new URLSearchParams(window.location.search);
             const roomId = urlParams.get('room');
-            if (roomId) {
-                try {
-                    const roomDoc = await getDoc(doc(db, 'rooms', roomId));
-                    if (roomDoc.exists()) {
-                        const data = roomDoc.data();
-                        const expireAt = data.expireAt?.toDate();
-                        if (expireAt && expireAt < new Date()) {
-                            alert('This room has expired');
-                            return;
-                        }
-                        currentRoomId = roomId;
-                        roomIdInput.value = roomId;
-                        strokes = data.strokes || [];
-                        transform = data.transform || { x: 0, y: 0, scale: 1 };
-                        redrawAll();
-                        joinConnection(roomId);
-                    } else {
-                        alert('Room not found');
-                    }
-                } catch (e) {
-                    console.error('Failed to load canvas state:', e);
-                }
+            if (roomId && roomIdInput.value === '') {
+                roomIdInput.value = roomId;
+                await joinRoomConnection(roomId);
             }
         }
 
-        // Create room popup
+        // Create room UI
         createRoomBtn.addEventListener('click', () => {
             createRoomPopup.style.display = 'flex';
             customRoomId.value = '';
@@ -572,7 +553,8 @@
         createRoomSubmit.addEventListener('click', async () => {
             const roomId = customRoomId.value.trim();
             const days = parseInt(expireDays.value);
-            if (!roomId.match(/^[a-zA-Z0-9]{8,20}$/)) {
+
+            if (roomId && (!roomId.match(/^[a-zA-Z0-9]{8,20}$/) || roomId.length < 8)) {
                 alert('Room ID must be 8-20 alphanumeric characters');
                 return;
             }
@@ -580,21 +562,56 @@
                 alert('Expiration must be between 1 and 7 days');
                 return;
             }
-            const newRoomId = await initiateConnection(roomId, days);
-            if (newRoomId) {
+
+            try {
+                const newRoomId = await createRoom(roomId, days);
                 createRoomPopup.style.display = 'none';
+                currentRoomId = newRoomId;
                 roomIdInput.value = newRoomId;
                 history.replaceState({}, '', `?room=${encodeURIComponent(newRoomId)}`);
-                alert(`Room created! Share this room ID with peers: ${newRoomId}`);
+                
+                // Setup listeners
+                setupRoomListeners(newRoomId, { strokes: [], transform });
+                
+                alert(`Room created! Share this room ID: ${newRoomId}`);
+                showUserBtn.classList.add('active');
+                showUsers = true;
+                updateUserList([{ sessionId, username: currentUsername }]);
+            } catch (error) {
+                alert(error.message);
             }
         });
 
         // Join room
+        async function joinRoomConnection(roomId) {
+            try {
+                const roomData = await joinRoom(roomId);
+                currentRoomId = roomId;
+                roomIdInput.value = roomId;
+                history.replaceState({}, '', `?room=${encodeURIComponent(roomId)}`);
+                
+                userStatusRef = doc(db, 'rooms', roomId, 'users', sessionId);
+                
+                // Load initial data
+                strokes = roomData.strokes || [];
+                transform = roomData.transform || { x: 0, y: 0, scale: 1 };
+                
+                // Setup listeners
+                setupRoomListeners(roomId, roomData);
+                
+                showUserBtn.classList.add('active');
+                showUsers = true;
+                alert(`Joined room: ${roomId}`);
+            } catch (error) {
+                alert(error.message);
+                roomIdInput.value = '';
+            }
+        }
+
         joinRoomBtn.addEventListener('click', () => {
             const roomId = roomIdInput.value.trim();
             if (roomId) {
-                joinConnection(roomId);
-                history.replaceState({}, '', `?room=${encodeURIComponent(roomId)}`);
+                joinRoomConnection(roomId);
             } else {
                 alert('Please enter a room ID');
             }
@@ -614,11 +631,19 @@
         // Color change
         colorPicker.addEventListener('change', () => {
             currentColor = colorPicker.value;
+            // Update user color in room
+            if (currentRoomId && userStatusRef) {
+                updateDoc(userStatusRef, { color: currentColor });
+            }
         });
 
         // Username change
         usernameInput.addEventListener('input', () => {
             currentUsername = usernameInput.value || 'Anonymous';
+            // Update username in room
+            if (currentRoomId && userStatusRef) {
+                updateDoc(userStatusRef, { username: currentUsername });
+            }
         });
 
         // Eraser toggle
@@ -633,15 +658,27 @@
         showUserBtn.addEventListener('click', () => {
             showUsers = !showUsers;
             showUserBtn.classList.toggle('active', showUsers);
+            userList.classList.toggle('active', showUsers);
         });
 
         // Clear all
-        clearBtn.addEventListener('click', () => {
-            ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-            strokes = [];
-            saveCanvasState();
-            broadcastMessage({ type: 'clear' });
-            history.replaceState({}, '', window.location.pathname);
+        clearBtn.addEventListener('click', async () => {
+            if (!currentRoomId) {
+                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+                strokes = [];
+                return;
+            }
+            try {
+                await updateDoc(doc(db, 'rooms', currentRoomId), {
+                    strokes: [],
+                    updatedAt: serverTimestamp()
+                });
+                // Local clear
+                strokes = [];
+                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+            } catch (error) {
+                console.error('Failed to clear canvas:', error);
+            }
         });
 
         // Update canvas cursor
@@ -699,7 +736,6 @@
             const clientY = e.clientY || (e.touches && e.touches[0].clientY);
             const x = (clientX - rect.left - transform.x) / transform.scale;
             const y = (clientY - rect.top - transform.y) / transform.scale;
-            console.log(`getWorldCoords: clientX=${clientX}, clientY=${clientY}, rect.left=${rect.left}, rect.top=${rect.top}, transform.x=${transform.x}, transform.y=${transform.y}, transform.scale=${transform.scale}, worldX=${x}, worldY=${y}`);
             return { x, y };
         }
 
@@ -730,26 +766,18 @@
             const { x, y } = getWorldCoords(e);
             const pressure = getPressure(e);
 
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineWidth = isEraser ? currentSize * 2 : currentSize * pressure;
-            ctx.strokeStyle = currentColor;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.globalAlpha = currentInputType === 'pen' ? 0.9 : 1.0;
-
             if (!isEraser) {
                 const stroke = {
+                    id: Date.now() + Math.random(),
                     username: currentUsername,
                     inputType: currentInputType,
                     color: currentColor,
                     points: [{ x, y, pressure }],
                     size: currentSize,
-                    isEraser: false
+                    timestamp: Date.now()
                 };
                 strokes.push(stroke);
                 saveCanvasState();
-                broadcastMessage({ type: 'stroke', stroke });
             }
         }
 
@@ -765,10 +793,7 @@
                 transform.x += clientX - lastPan.x;
                 transform.y += clientY - lastPan.y;
                 lastPan = { x: clientX, y: clientY };
-                ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-                redrawAll();
                 saveCanvasState();
-                broadcastMessage({ type: 'transform', transform: { ...transform } });
                 return;
             }
             if (!isDrawing) return;
@@ -778,31 +803,36 @@
 
             if (isEraser) {
                 const eraserRadius = currentSize * 2 / transform.scale;
-                const erasedIndices = [];
-                strokes = strokes.filter((stroke, index) => {
+                const erasedStrokes = [];
+                strokes = strokes.filter((stroke) => {
                     if (isPointNearStroke(x, y, stroke, eraserRadius)) {
-                        erasedIndices.push(index);
+                        erasedStrokes.push(stroke.id);
                         return false;
                     }
                     return true;
                 });
-                if (erasedIndices.length > 0) {
-                    ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-                    redrawAll();
+                if (erasedStrokes.length > 0) {
                     saveCanvasState();
-                    broadcastMessage({ type: 'erase', indices: erasedIndices });
                 }
             } else {
-                ctx.lineTo(x, y);
-                ctx.lineWidth = currentSize * pressure;
-                ctx.strokeStyle = currentColor;
-                ctx.globalAlpha = currentInputType === 'pen' ? 0.9 : 1.0;
-                ctx.stroke();
                 const lastStroke = strokes[strokes.length - 1];
-                lastStroke.points.push({ x, y, pressure });
-                lastStroke.color = currentColor;
-                saveCanvasState();
-                broadcastMessage({ type: 'stroke', stroke: lastStroke });
+                if (lastStroke) {
+                    lastStroke.points.push({ x, y, pressure });
+                    // Draw locally
+                    ctx.save();
+                    applyTransform();
+                    ctx.beginPath();
+                    ctx.moveTo(lastStroke.points[lastStroke.points.length - 2].x, lastStroke.points[lastStroke.points.length - 2].y);
+                    ctx.lineTo(x, y);
+                    ctx.lineWidth = lastStroke.size * pressure;
+                    ctx.strokeStyle = lastStroke.color;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.globalAlpha = currentInputType === 'pen' ? 0.9 : 1.0;
+                    ctx.stroke();
+                    ctx.restore();
+                    saveCanvasState();
+                }
             }
         }
 
@@ -812,21 +842,27 @@
                 return;
             }
             isDrawing = false;
-            ctx.globalAlpha = 1.0;
         }
 
         // Apply canvas transform
         function applyTransform() {
             const dpr = window.devicePixelRatio || 1;
             ctx.setTransform(transform.scale * dpr, 0, 0, transform.scale * dpr, transform.x * dpr, transform.y * dpr);
-            console.log(`applyTransform: scale=${transform.scale}, dpr=${dpr}, x=${transform.x}, y=${transform.y}`);
         }
 
         // Redraw all strokes
         function redrawAll() {
-            ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+            
+            ctx.save();
             applyTransform();
+            
             strokes.forEach(stroke => {
+                if (stroke.points.length < 2) return;
+                
                 ctx.beginPath();
                 ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
                 ctx.lineWidth = stroke.size * stroke.points[0].pressure;
@@ -834,14 +870,16 @@
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.globalAlpha = stroke.inputType === 'pen' ? 0.9 : 1.0;
-                stroke.points.forEach((point, i) => {
-                    if (i === 0) return;
-                    ctx.lineTo(point.x, point.y);
-                    ctx.lineWidth = stroke.size * point.pressure;
+                
+                for (let i = 1; i < stroke.points.length; i++) {
+                    ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+                    ctx.lineWidth = stroke.size * stroke.points[i].pressure;
                     ctx.stroke();
-                });
+                }
             });
+            
             ctx.globalAlpha = 1.0;
+            ctx.restore();
         }
 
         // Handle hover for usernames
@@ -894,10 +932,7 @@
                     const midY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
                     transform.x -= (midX / oldScale - midX / transform.scale) * transform.scale;
                     transform.y -= (midY / oldScale - midY / transform.scale) * transform.scale;
-                    ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-                    redrawAll();
                     saveCanvasState();
-                    broadcastMessage({ type: 'transform', transform: { ...transform } });
                 }
                 lastPinchDistance = distance;
             } else {
@@ -908,26 +943,37 @@
         // Mouse and touch events
         canvas.addEventListener('pointerdown', (e) => {
             if (e.target !== canvas) return;
+            e.preventDefault();
             startDrawing(e);
         });
+        
         canvas.addEventListener('pointermove', (e) => {
             if (e.target !== canvas) return;
+            e.preventDefault();
             draw(e);
             handleHover(e);
         });
-        canvas.addEventListener('pointerup', stopDrawing);
-        canvas.addEventListener('pointerleave', stopDrawing);
+        
+        canvas.addEventListener('pointerup', (e) => {
+            e.preventDefault();
+            stopDrawing();
+        });
+        
+        canvas.addEventListener('pointerleave', (e) => {
+            e.preventDefault();
+            stopDrawing();
+        });
 
+        // Touch events for mobile
         canvas.addEventListener('touchstart', (e) => {
             if (e.target !== canvas) return;
-            if (e.touches.length === 1) {
-                startDrawing(e);
-            } else if (e.touches.length === 2) {
-                startDrawing(e);
-            }
+            e.preventDefault();
+            startDrawing(e);
         });
+        
         canvas.addEventListener('touchmove', (e) => {
             if (e.target !== canvas) return;
+            e.preventDefault();
             if (e.touches.length === 1) {
                 draw(e);
                 handleHover(e);
@@ -935,7 +981,9 @@
                 handlePinch(e);
             }
         });
+        
         canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
             stopDrawing();
             lastPinchDistance = null;
         });
@@ -952,22 +1000,31 @@
             const mouseY = e.clientY - rect.top;
             transform.x -= (mouseX / oldScale - mouseX / transform.scale) * transform.scale;
             transform.y -= (mouseY / oldScale - mouseY / transform.scale) * transform.scale;
-            ctx.clearRect(-1e10, -1e10, 2e10, 2e10);
-            redrawAll();
             saveCanvasState();
-            broadcastMessage({ type: 'transform', transform: { ...transform } });
         });
 
         // Prevent default scrolling
-        document.body.addEventListener('touchstart', (e) => { if (e.target === canvas) e.preventDefault(); });
-        document.body.addEventListener('touchmove', (e) => { if (e.target === canvas) e.preventDefault(); });
-        document.body.addEventListener('touchend', (e) => { if (e.target === canvas) e.preventDefault(); });
+        document.body.addEventListener('touchstart', (e) => { 
+            if (e.target === canvas) e.preventDefault(); 
+        }, { passive: false });
+        document.body.addEventListener('touchmove', (e) => { 
+            if (e.target === canvas) e.preventDefault(); 
+        }, { passive: false });
+        document.body.addEventListener('touchend', (e) => { 
+            if (e.target === canvas) e.preventDefault(); 
+        }, { passive: false });
+
+        // Prevent context menu on right click
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
         // Initialize
         currentUsername = usernameInput.value || 'Anonymous';
+        usernameInput.value = currentUsername;
         updateCanvasCursor();
-        applyTransform();
-        loadFromFirebase();
+        loadFromUrl();
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', leaveRoom);
     </script>
 </body>
 </html>
